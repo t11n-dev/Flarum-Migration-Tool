@@ -15,19 +15,19 @@ class DeleteBackupController implements RequestHandlerInterface
 
     public function __construct()
     {
-        
     }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
-        $this->migrationService = new MigrationService();
-        $actor = RequestUtil::getActor($request);
-        $actor->assertAdmin();
-
-        $filename = $request->getAttribute('filename');
-
         try {
+            $this->migrationService = new MigrationService();
+            $actor = RequestUtil::getActor($request);
+            $actor->assertAdmin();
+
+            $filename = basename($request->getAttribute('filename'));
+
             $result = $this->migrationService->deleteBackup($filename);
+            
             return new JsonResponse($result);
         } catch (\Throwable $e) {
             return new JsonResponse([

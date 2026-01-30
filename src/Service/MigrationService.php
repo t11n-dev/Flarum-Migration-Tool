@@ -275,8 +275,19 @@ class MigrationService
 
     public function deleteBackup($filename)
     {
+        $filename = basename($filename);
         $p = $this->backupPath . '/' . $filename;
-        if (file_exists($p)) unlink($p);
+        
+        if (!file_exists($p)) {
+            throw new \Exception("Backup file does not exist: $filename");
+        }
+
+        if (!unlink($p)) {
+            throw new \Exception("Failed to delete backup file: $filename. Check file permissions.");
+        }
+
+        $this->log("Deleted backup: $filename");
+        
         return ['success' => true];
     }
 
