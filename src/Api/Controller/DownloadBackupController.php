@@ -4,6 +4,7 @@ namespace Nauhyuh\MigrationTool\Api\Controller;
 
 use Flarum\Http\RequestUtil;
 use Laminas\Diactoros\Response;
+use Laminas\Diactoros\Response\JsonResponse;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
@@ -19,7 +20,7 @@ class DownloadBackupController implements RequestHandlerInterface
         $backupPath = storage_path('backups/' . $filename);
 
         if (!file_exists($backupPath)) {
-            return new Response\JsonResponse(['error' => 'Backup not found'], 404);
+            return new JsonResponse(['error' => 'Backup not found'], 404);
         }
 
         $response = new Response();
