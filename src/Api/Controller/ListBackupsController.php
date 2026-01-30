@@ -20,14 +20,22 @@ class ListBackupsController implements RequestHandlerInterface
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
-        $actor = RequestUtil::getActor($request);
-        $actor->assertAdmin();
+        try {
+            $actor = RequestUtil::getActor($request);
+            $actor->assertAdmin();
 
-        $backups = $this->migrationService->listBackups();
+            $backups = $this->migrationService->listBackups();
 
-        return new JsonResponse([
-            'success' => true,
-            'backups' => $backups
-        ]);
+            return new JsonResponse([
+                'success' => true,
+                'backups' => $backups
+            ]);
+        } catch (\Exception $e) {
+            return new JsonResponse([
+                'success' => false,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ], 500);
+        }
     }
 }

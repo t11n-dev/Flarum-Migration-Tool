@@ -20,30 +20,38 @@ class MigrationStatusController implements RequestHandlerInterface
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
-        $actor = RequestUtil::getActor($request);
-        $actor->assertAdmin();
+        try {
+            $actor = RequestUtil::getActor($request);
+            $actor->assertAdmin();
 
-        $uploadPath = storage_path('migration_upload');
-        $uploads = [];
+            $uploadPath = storage_path('migration_upload');
+            $uploads = [];
 
-        if (is_dir($uploadPath)) {
-            $files = scandir($uploadPath);
-            foreach ($files as $file) {
-                if (pathinfo($file, PATHINFO_EXTENSION) === 'zip') {
-                    $filePath = $uploadPath . '/' . $file;
-                    $uploads[] = [
-                        'filename' => $file,
-                        'size' => filesize($filePath),
-                        'uploaded' => filemtime($filePath)
-                    ];
+            if (is_dir($uploadPath)) {
+                $files = scandir($uploadPath);
+                foreach ($files as $file) {
+                    if (pathinfo($file, PATHINFO_EXTENSION) === 'zip') {
+                        $filePath = $uploadPath . '/' . $file;
+                        $uploads[] = [
+                            'filename' => $file,
+                            'size' => filesize($filePath),
+                            'uploaded' => filemtime($filePath)
+                        ];
+                    }
                 }
             }
-        }
 
-        return new JsonResponse([
-            'success' => true,
-            'uploads' => $uploads,
-            'backup_count' => count($this->migrationService->listBackups())
-        ]);
+            return new JsonResponse([
+                'success' => true,
+                'uploads' => $uploads,
+                'backup_count' => count($this->migrationService->listBackups())
+            ]);
+        } catch (\Exception $e) {
+            return new JsonResponse([
+                'success' => false,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ], 500);
+        }
     }
 }

@@ -5,11 +5,11 @@ namespace Nauhyuh\MigrationTool\Service;
 use Illuminate\Database\ConnectionInterface;
 use Flarum\Settings\SettingsRepositoryInterface;
 use Illuminate\Filesystem\Filesystem;
-use Flarum\Foundation\Config;
 use ZipArchive;
 
 class MigrationService
 {
+    protected $db;
     protected $settings;
     protected $files;
     protected $backupPath;
@@ -135,7 +135,7 @@ class MigrationService
      */
     protected function exportDatabase($filePath)
     {
-        $config = resolve('flarum.config');
+        $config = app('flarum.config');
         $conf = $config['database'];
         
         // Security: Create a temporary config file to store credentials
