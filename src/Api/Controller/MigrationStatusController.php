@@ -46,7 +46,7 @@ class MigrationStatusController implements RequestHandlerInterface
                 'uploads' => $uploads,
                 'backup_count' => count($this->migrationService->listBackups())
             ]);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return new JsonResponse([
                 'success' => false,
                 'error' => $e->getMessage(),

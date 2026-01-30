@@ -28,7 +28,7 @@ class DeleteBackupController implements RequestHandlerInterface
         try {
             $result = $this->migrationService->deleteBackup($filename);
             return new JsonResponse($result);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return new JsonResponse([
                 'success' => false,
                 'error' => $e->getMessage()

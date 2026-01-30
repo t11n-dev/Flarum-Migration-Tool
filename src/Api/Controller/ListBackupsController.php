@@ -30,7 +30,7 @@ class ListBackupsController implements RequestHandlerInterface
                 'success' => true,
                 'backups' => $backups
             ]);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return new JsonResponse([
                 'success' => false,
                 'error' => $e->getMessage(),

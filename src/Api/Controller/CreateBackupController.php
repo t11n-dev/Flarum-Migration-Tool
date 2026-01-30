@@ -31,7 +31,7 @@ class CreateBackupController implements RequestHandlerInterface
         try {
             $result = $this->migrationService->createBackup($includeUploads, $includeVendor);
             return new JsonResponse($result);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return new JsonResponse([
                 'success' => false,
                 'error' => $e->getMessage(),

@@ -26,9 +26,12 @@ class MigrationService
         $this->backupPath = storage_path('backups');
         $this->logPath = storage_path('logs/migration.log');
         
-        // Tạo thư mục backups nếu chưa có
         if (!is_dir($this->backupPath)) {
-            mkdir($this->backupPath, 0755, true);
+            @mkdir($this->backupPath, 0755, true);
+        }
+
+        if (!class_exists('ZipArchive')) {
+            throw new \Exception("PHP 'zip' extension is not installed. ZIP functionality is required for backups.");
         }
     }
 
@@ -119,7 +122,7 @@ class MigrationService
                 'timestamp' => $timestamp
             ];
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->log('Error: ' . $e->getMessage(), 'error');
             
             // Cleanup

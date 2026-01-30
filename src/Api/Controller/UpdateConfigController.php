@@ -59,7 +59,7 @@ class UpdateConfigController implements RequestHandlerInterface
                 'message' => 'Configuration updated successfully'
             ]);
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return new JsonResponse([
                 'success' => false,
                 'error' => $e->getMessage()

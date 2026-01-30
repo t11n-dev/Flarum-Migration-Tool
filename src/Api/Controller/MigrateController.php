@@ -81,7 +81,7 @@ class MigrateController implements RequestHandlerInterface
             try {
                 \Artisan::call('migrate', ['--force' => true]);
                 \Artisan::call('cache:clear');
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 $this->migrationService->log("Artisan warning: " . $e->getMessage());
             }
 
@@ -100,7 +100,7 @@ class MigrateController implements RequestHandlerInterface
                 'message' => 'Migration completed successfully!'
             ]);
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->migrationService->log("Migration error: " . $e->getMessage(), 'error');
             return new JsonResponse([
                 'success' => false,
