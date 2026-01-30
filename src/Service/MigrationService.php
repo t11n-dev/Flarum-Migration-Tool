@@ -145,16 +145,15 @@ class MigrationService
 
                 fwrite($handle, "DROP TABLE IF EXISTS `{$tableName}`;\n" . $createSql . ";\n\n");
 
-                // Export data using cursor to save memory and avoid orderBy requirement
+                // Export data using raw PDO to avoid duplicated prefixes from Query Builder
                 $count = 0;
-                $rows = $this->db->table($tableName)->cursor();
+                $stmt = $this->db->getPdo()->query("SELECT * FROM `{$tableName}`");
 
-                foreach ($rows as $row) {
-                    $rowArray = (array)$row;
-                    $columns = array_keys($rowArray);
+                while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                    $columns = array_keys($row);
                     $values = array_map(function($value) {
                         return $value === null ? 'NULL' : $this->db->getPdo()->quote($value);
-                    }, array_values($rowArray));
+                    }, array_values($row));
 
                     $sql = "INSERT INTO `{$tableName}` (`" . implode("`, `", $columns) . "`) VALUES (" . implode(", ", $values) . ");\n";
                     fwrite($handle, $sql);
