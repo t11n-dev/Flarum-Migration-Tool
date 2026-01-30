@@ -289,6 +289,8 @@ class MigrationService
         $config = app('flarum.config');
         $conf = $config['database'];
         
+        $this->log("Attempting database export via mysqldump...");
+
         $cnfFile = sys_get_temp_dir() . '/flarum_dump_' . uniqid() . '.cnf';
         $cnfContent = "[client]\n" .
                       "user=\"" . addslashes($conf['username']) . "\"\n" .
@@ -296,33 +298,86 @@ class MigrationService
                       "host=\"" . addslashes($conf['host']) . "\"\n" .
                       "port=\"" . addslashes($conf['port'] ?? 3306) . "\"";
         
-        file_put_contents($cnfFile, $cnfContent);
-        chmod($cnfFile, 0600);
+        @file_put_contents($cnfFile, $cnfContent);
+        @chmod($cnfFile, 0600);
 
-        try {
-            $cmd = sprintf(
-                'mysqldump --defaults-extra-file=%s --single-transaction --quick --no-tablespaces %s > %s',
-                escapeshellarg($cnfFile),
-                escapeshellarg($conf['database']),
-                escapeshellarg($filePath)
-            );
-            
-            $output = [];
-            $returnVar = 0;
-            exec($cmd . ' 2>&1', $output, $returnVar);
-            
-            if ($returnVar !== 0) {
-                $errorMsg = implode("\n", $output);
-                if (strpos($errorMsg, 'command not found') !== false) {
-                    throw new \Exception("mysqldump binary not found.");
+        $success = false;
+
+        if (function_exists('exec')) {
+            try {
+                $cmd = sprintf(
+                    'mysqldump --defaults-extra-file=%s --single-transaction --quick --no-tablespaces %s > %s',
+                    escapeshellarg($cnfFile),
+                    escapeshellarg($conf['database']),
+                    escapeshellarg($filePath)
+                );
+                
+                $output = [];
+                $returnVar = 0;
+                exec($cmd . ' 2>&1', $output, $returnVar);
+                
+                if ($returnVar === 0) {
+                    $success = true;
+                } else {
+                    $this->log("mysqldump failed (code $returnVar): " . implode("\n", $output), 'warning');
                 }
-                throw new \Exception('mysqldump failed: ' . $errorMsg);
+            } catch (\Throwable $e) {
+                $this->log("mysqldump exception: " . $e->getMessage(), 'warning');
             }
-        } finally {
-            if (file_exists($cnfFile)) {
-                @unlink($cnfFile);
-            }
+        } else {
+            $this->log("exec() is disabled, cannot use mysqldump.", 'warning');
         }
+
+        if (file_exists($cnfFile)) {
+            @unlink($cnfFile);
+        }
+
+        if (!$success) {
+            $this->log("Falling back to PHP-based database export (slower)...");
+            $this->phpExportDatabase($filePath);
+        }
+    }
+
+    /**
+     * Pure PHP database export (Fallback)
+     */
+    protected function phpExportDatabase($filePath)
+    {
+        $tables = $this->db->select('SHOW TABLES');
+        $dbName = $this->db->getDatabaseName();
+        $key = "Tables_in_{$dbName}";
+        
+        $handle = fopen($filePath, 'w');
+        fwrite($handle, "-- Flarum PHP Backup\n-- Date: " . date('Y-m-d H:i:s') . "\n\nSET FOREIGN_KEY_CHECKS=0;\n\n");
+
+        foreach ($tables as $table) {
+            $tableName = $table->$key;
+            $this->log("Exporting table: {$tableName}");
+
+            // Create table
+            $createTable = $this->db->select("SHOW CREATE TABLE `{$tableName}`")[0];
+            $createKey = 'Create Table';
+            fwrite($handle, "DROP TABLE IF EXISTS `{$tableName}`;\n" . $createTable->$createKey . ";\n\n");
+
+            // Data
+            $rows = $this->db->table($tableName)->get();
+            foreach ($rows as $row) {
+                $rowArray = (array)$row;
+                $columns = array_keys($rowArray);
+                $values = array_map(function($value) {
+                    if ($value === null) return 'NULL';
+                    return $this->db->getPdo()->quote($value);
+                }, array_values($rowArray));
+
+                $sql = "INSERT INTO `{$tableName}` (`" . implode("`, `", $columns) . "`) VALUES (" . implode(", ", $values) . ");\n";
+                fwrite($handle, $sql);
+            }
+            fwrite($handle, "\n");
+        }
+
+        fwrite($handle, "SET FOREIGN_KEY_CHECKS=1;\n");
+        fclose($handle);
+        return true;
     }
 
     protected function exportSettings($filePath)
