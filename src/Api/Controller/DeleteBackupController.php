@@ -24,7 +24,17 @@ class DeleteBackupController implements RequestHandlerInterface
             $actor = RequestUtil::getActor($request);
             $actor->assertAdmin();
 
-            $filename = basename($request->getAttribute('filename'));
+            $filenameAttr = $request->getAttribute('filename');
+            
+            if (empty($filenameAttr)) {
+                return new JsonResponse(['success' => false, 'error' => 'Filename parameter is missing'], 400);
+            }
+
+            $filename = basename($filenameAttr);
+            
+            if ($filename === '.' || empty($filename)) {
+                return new JsonResponse(['success' => false, 'error' => 'Invalid filename'], 400);
+            }
 
             $result = $this->migrationService->deleteBackup($filename);
             

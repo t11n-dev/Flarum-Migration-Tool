@@ -18,7 +18,18 @@ class DownloadBackupController implements RequestHandlerInterface
             $actor = RequestUtil::getActor($request);
             $actor->assertAdmin();
 
-            $filename = basename($request->getAttribute('filename'));
+            $filenameAttr = $request->getAttribute('filename');
+
+            if (empty($filenameAttr)) {
+                return new JsonResponse(['error' => 'Filename parameter is missing'], 400);
+            }
+
+            $filename = basename($filenameAttr);
+
+            if ($filename === '.' || empty($filename)) {
+                return new JsonResponse(['error' => 'Invalid filename'], 400);
+            }
+
             $backupPath = storage_path('backups/' . $filename);
 
             if (!file_exists($backupPath) || !is_readable($backupPath)) {
