@@ -120,102 +120,64 @@ class MigrationService
     }
 
     /**
-     * Database Export Logic with Fallback
+     * Database Export Logic - Pure PHP (Most compatible)
      */
     protected function exportDatabase($filePath)
     {
-        $config = app('flarum.config');
-        $dbConfig = $config['database'];
+        $this->log("Starting native PHP database export...");
         
-        $success = false;
+        try {
+            $handle = fopen($filePath, 'w');
+            if (!$handle) throw new \Exception("Cannot open file for writing: " . $filePath);
 
-        // Try mysqldump first
-        if (function_exists('exec')) {
-            $cnfFile = storage_path('migration_temp/mysql_' . uniqid() . '.cnf');
-            if (!is_dir(dirname($cnfFile))) @mkdir(dirname($cnfFile), 0755, true);
+            fwrite($handle, "-- Flarum Native PHP Backup\n-- Date: " . date('Y-m-d H:i:s') . "\n\nSET FOREIGN_KEY_CHECKS=0;\nSET NAMES utf8mb4;\n\n");
 
-            $cnfContent = "[client]\n" .
-                          "user=\"" . addslashes($dbConfig['username']) . "\"\n" .
-                          "password=\"" . addslashes($dbConfig['password']) . "\"\n" .
-                          "host=\"" . addslashes($dbConfig['host']) . "\"\n" .
-                          "port=\"" . addslashes($dbConfig['port'] ?? 3306) . "\"";
-            
-            file_put_contents($cnfFile, $cnfContent);
-            chmod($cnfFile, 0600);
+            $dbName = $this->db->getDatabaseName();
+            // Get tables using PHP
+            $tables = $this->db->getPdo()->query('SHOW TABLES')->fetchAll(\PDO::FETCH_COLUMN);
 
-            try {
-                $this->log("Attempting mysqldump...");
-                $cmd = sprintf(
-                    'mysqldump --defaults-extra-file=%s --single-transaction --quick --no-tablespaces %s > %s',
-                    escapeshellarg($cnfFile),
-                    escapeshellarg($dbConfig['database']),
-                    escapeshellarg($filePath)
-                );
+            foreach ($tables as $tableName) {
+                $this->log("Exporting table: {$tableName}");
+
+                // Get Create Table - use associative to avoid case issues (Create Table vs create table)
+                $createStmt = $this->db->getPdo()->query("SHOW CREATE TABLE `{$tableName}`")->fetch(\PDO::FETCH_ASSOC);
+                $createSql = array_values($createStmt)[1]; // The 2nd column is always the SQL
+
+                fwrite($handle, "DROP TABLE IF EXISTS `{$tableName}`;\n" . $createSql . ";\n\n");
+
+                // Export data in chunks to save memory
+                $count = 0;
+                $this->db->table($tableName)->chunk(1000, function ($rows) use ($handle, $tableName, &$count) {
+                    if ($rows->isEmpty()) return;
+
+                    foreach ($rows as $row) {
+                        $rowArray = (array)$row;
+                        $columns = array_keys($rowArray);
+                        $values = array_map(function($value) {
+                            if ($value === null) return 'NULL';
+                            // Use PDO quote to handle strings and special characters safely
+                            return $this->db->getPdo()->quote($value);
+                        }, array_values($rowArray));
+
+                        $sql = "INSERT INTO `{$tableName}` (`" . implode("`, `", $columns) . "`) VALUES (" . implode(", ", $values) . ");\n";
+                        fwrite($handle, $sql);
+                        $count++;
+                    }
+                });
                 
-                $output = [];
-                $returnVar = 0;
-                exec($cmd . ' 2>&1', $output, $returnVar);
-                
-                if ($returnVar === 0) {
-                    $this->log("mysqldump succeeded.");
-                    $success = true;
-                } else {
-                    $this->log("mysqldump failed with code {$returnVar}: " . implode("\n", $output), 'warning');
-                }
-            } catch (\Throwable $e) {
-                $this->log("mysqldump exception: " . $e->getMessage(), 'warning');
+                fwrite($handle, "\n");
+                $this->log(" -> Exported {$count} rows from {$tableName}");
             }
 
-            if (file_exists($cnfFile)) @unlink($cnfFile);
-        }
-
-        // Fallback to PHP-based export
-        if (!$success) {
-            $this->log("Falling back to pure PHP database export (this may take a minute)...");
-            $this->phpExportDatabase($filePath);
-        }
-    }
-
-    /**
-     * Robust PHP-based Database Exporter
-     */
-    protected function phpExportDatabase($filePath)
-    {
-        $dbName = $this->db->getDatabaseName();
-        $tables = $this->db->select('SHOW TABLES');
-        $keyName = "Tables_in_{$dbName}";
-
-        $handle = fopen($filePath, 'w');
-        fwrite($handle, "-- Flarum PHP Backup\n-- Date: " . date('Y-m-d H:i:s') . "\n\nSET FOREIGN_KEY_CHECKS=0;\nSET NAMES utf8mb4;\n\n");
-
-        foreach ($tables as $table) {
-            $tableName = $table->$keyName;
+            fwrite($handle, "SET FOREIGN_KEY_CHECKS=1;\n");
+            fclose($handle);
+            $this->log("Native database export completed successfully.");
             
-            // Get create table statement
-            $createTable = $this->db->select("SHOW CREATE TABLE `{$tableName}`")[0];
-            $createKey = 'Create Table';
-            fwrite($handle, "DROP TABLE IF EXISTS `{$tableName}`;\n" . $createTable->$createKey . ";\n\n");
-
-            // Export rows
-            $this->db->table($tableName)->chunk(500, function ($rows) use ($handle, $tableName) {
-                foreach ($rows as $row) {
-                    $rowArray = (array)$row;
-                    $columns = array_keys($rowArray);
-                    $values = array_map(function($value) {
-                        if ($value === null) return 'NULL';
-                        return $this->db->getPdo()->quote($value);
-                    }, array_values($rowArray));
-
-                    $sql = "INSERT INTO `{$tableName}` (`" . implode("`, `", $columns) . "`) VALUES (" . implode(", ", $values) . ");\n";
-                    fwrite($handle, $sql);
-                }
-            });
-            fwrite($handle, "\n");
+            return true;
+        } catch (\Throwable $e) {
+            $this->log("PHP Export Error: " . $e->getMessage(), 'error');
+            throw $e;
         }
-
-        fwrite($handle, "SET FOREIGN_KEY_CHECKS=1;\n");
-        fclose($handle);
-        $this->log("PHP database export completed.");
     }
 
     /**
