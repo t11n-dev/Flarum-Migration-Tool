@@ -1,309 +1,135 @@
 # Flarum Migration Tool - Complete Admin UI
 
-Extension Flarum với giao diện admin đầy đủ để sao lưu và di chuyển forum sang server mới một cách tự động.
+A powerful Flarum extension that provides a full Admin UI for backing up, restoring, and migrating your forum to a new server with ease.
 
 ![Version](https://img.shields.io/badge/version-2.0.0-blue)
 ![Flarum](https://img.shields.io/badge/flarum-%5E1.0-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-## ✨ Tính năng
+## ✨ Key Features
 
-### Tab Backup (Sao lưu)
-- ✅ Tạo backup đầy đủ qua giao diện admin
-- ✅ Tùy chọn bao gồm/loại trừ uploads và vendor
-- ✅ Danh sách tất cả các backup với kích thước và ngày tạo
-- ✅ Download backup trực tiếp
-- ✅ Xóa backup không cần thiết
-- ✅ Tự động tạo file ZIP chứa:
-  - Database (SQL)
-  - Settings (JSON)
-  - Config.php
-  - Composer.json & composer.lock
-  - Uploaded files (avatars, attachments)
-  - Extensions data
-  - Migration script tự động
-  - Metadata đầy đủ
+### 🛡️ Backup (Server A)
+- **One-click Full Backup**: Generates a complete ZIP archive directly from the Admin Panel.
+- **Smart Database Dump**: Uses system `mysqldump` for speed and reliability (no more PHP memory limit issues).
+- **Flexible Options**: Choose to include/exclude uploads or vendor files.
+- **Components Included**:
+  - Database (`.sql` via mysqldump)
+  - Settings (`.json`)
+  - Config (`config.php`)
+  - Composer dependencies (`composer.json`, `composer.lock`)
+  - Assets (Avatars, uploads)
+  - Extension Data
+  - **Auto-Restore Script** (`migrate.sh`)
 
-### Tab Migrate (Di chuyển)
-- ✅ Upload file backup ZIP qua giao diện
-- ✅ Cấu hình database và URL mới ngay trong admin
-- ✅ Tự động import database
-- ✅ Tự động copy files
-- ✅ Tự động chạy composer install
-- ✅ Tự động cập nhật config.php
-- ✅ Tự động chạy migrations
-- ✅ Cảnh báo rõ ràng về việc ghi đè dữ liệu
+### 🚀 Migrate & Restore (Server B)
+- **Intelligent Restoration**:
+  - **Smart Config Patching**: Updates `config.php` database/url values while **preserving** your existing mail, queue, and driver settings.
+  - **Permission Aware**: Automatically creates correct permissions (detects if running as Root vs Shared Host).
+- **Two Ways to Restore**:
+  1. **via Admin UI**: Upload the ZIP and let the extension handle everything.
+  2. **via Terminal (Recommended)**: Use the generated `migrate.sh` script for a robust restoration on fresh servers.
 
-### Tab Logs (Nhật ký)
-- ✅ Xem real-time logs của quá trình migration
-- ✅ Track mọi bước trong quá trình
-- ✅ Debug dễ dàng nếu có lỗi
+## 📦 Installation
 
-## 📦 Cài đặt
-
-### 1. Cài đặt Extension
+### 1. Install Extension
 
 ```bash
 composer require nauhyuh/flarum-migration-tool
 ```
 
-### 2. Build Frontend Assets
-
-```bash
-cd vendor/nauhyuh/flarum-migration-tool
-npm install
-npm run build
-```
-
-### 3. Enable Extension
+### 2. Enable Extension
 
 ```bash
 php flarum extension:enable nauhyuh-migration-tool
 ```
 
-Hoặc enable qua Admin Panel → Extensions
+## 📖 Usage Guide
 
-## 🚀 Sử dụng
+### A. On the Old Server (Backup)
 
-### A. Trên Server Cũ - Tạo Backup
+1.  Log in to the **Admin Panel**.
+2.  Navigate to **Migration Tool**.
+3.  Go to the **Backup** tab.
+4.  Select options:
+    *   ✅ **Include uploaded files** (Recommended)
+    *   ⬜ **Include vendor** (Not recommended - makes the file huge; `composer install` is faster).
+5.  Click **Create Backup**.
+6.  Once finished, click **Download** to save the ZIP file.
 
-1. Đăng nhập Admin Panel
-2. Vào **Extensions** → **Migration Tool**
-3. Chọn tab **Backup**
-4. Tùy chọn:
-   - ☑️ Include uploaded files (nên chọn)
-   - ☐ Include vendor (không khuyến khích - sẽ làm file rất lớn)
-5. Click **Create Backup**
-6. Đợi quá trình hoàn tất (có thể mất vài phút)
-7. Download file ZIP từ danh sách backups
+### B. On the New Server (Restore)
 
-### B. Trên Server Mới - Restore & Migrate
+#### Method 1: Using the Auto-Script (Best for VPS/Terminal)
 
-#### Cách 1: Sử dụng Giao diện Admin (Khuyến nghị)
+Every backup ZIP comes with a smart `migrate.sh` script.
 
-1. Cài đặt Flarum mới trên server mới:
-```bash
-composer create-project flarum/flarum .
+1.  Upload the ZIP file to your new server folder.
+2.  Unzip it:
+    ```bash
+    unzip flarum_backup_202X-XX-XX.zip -d restore_temp
+    ```
+3.  Run the script:
+    ```bash
+    cd restore_temp
+    chmod +x migrate.sh
+    ./migrate.sh
+    ```
+4.  Follow the prompts. The script will:
+    *   Import the database.
+    *   Restore files.
+    *   Patch `config.php` safely.
+    *   Run `composer install`.
+    *   Fix permissions automatically.
+
+#### Method 2: Using Admin UI (If you already have a fresh Flarum)
+
+1.  Install a fresh Flarum instance on the new server.
+2.  Install this extension (`composer require nauhyuh/flarum-migration-tool`).
+3.  Enable it and go to **Admin Panel** > **Migration Tool**.
+4.  Switch to the **Migrate** tab.
+5.  Upload your Backup ZIP.
+6.  Fill in the new **Database Credentials** and **Site URL**.
+7.  Click **Start Migration**.
+
+## 🛠️ Metadata & Structure
+
+The backup ZIP follows this structure:
+
+```text
+backup.zip
+├── database.sql        # High-performance MySQL dump
+├── settings.json       # Flarum settings table export
+├── config.php          # Original config
+├── composer.json       # Dependency map
+├── metadata.json       # Server & Environment info
+├── migrate.sh          # <---The magic restore script
+├── assets/             # Public assets
+└── storage/            # Internal storage files
 ```
 
-2. Cài đặt extension này:
-```bash
-composer require nauhyuh/flarum-migration-tool
-php flarum extension:enable nauhyuh-migration-tool
-```
+## ⚠️ Security & Safety
 
-3. Đăng nhập Admin Panel
-4. Vào **Extensions** → **Migration Tool**
-5. Chọn tab **Migrate**
-6. Upload file backup ZIP đã download từ server cũ
-7. Điền thông tin:
-   - **New Site URL**: `https://your-new-domain.com`
-   - **Database Host**: `localhost`
-   - **Database Name**: `your_database`
-   - **Database Username**: `your_user`
-   - **Database Password**: `your_password`
-8. Click **Start Migration**
-9. Đợi quá trình hoàn tất
-10. Kiểm tra tab **Logs** để xem chi tiết
+*   **Sensitive Data**: Backups contain your **entire database** and **config secrets**. Store them securely.
+*   **HTTPS**: Always use HTTPS when uploading/downloading backups via the Admin UI.
+*   **Permissions**: The tool tries to be smart, but always ensure your `storage` folder is writable (`775`).
 
-#### Cách 2: Sử dụng Script Tự động (Nếu admin không khả dụng)
+## ❓ Troubleshooting
 
-File backup đã chứa sẵn script `migrate.sh`:
+**"mysqldump not found"**
+The extension requires `mysqldump` to be installed on the server for high-performance backups. If you are on shared hosting without it, please contact your host or use the legacy PHP-based backup (available in older versions).
 
-```bash
-# Giải nén backup
-unzip flarum_backup_2026-01-30_12-00-00.zip -d migration_temp
+**"Permission denied"**
+If `migrate.sh` fails with permission errors, try running it with `sudo` or check if the folder allows execution.
 
-# Chạy script migration
-cd migration_temp
-chmod +x migrate.sh
-./migrate.sh
-```
-
-Script sẽ tự động:
-1. Hỏi thông tin database
-2. Import database
-3. Copy files
-4. Cài đặt dependencies
-5. Cập nhật config
-6. Chạy migrations
-
-## 📋 Quy trình Di chuyển Chi tiết
-
-### Trên Server Cũ:
-
-```
-1. Login Admin
-2. Extensions → Migration Tool → Tab Backup
-3. Chọn options → Create Backup
-4. Download file ZIP
-```
-
-### Trên Server Mới:
-
-```
-1. Cài Flarum mới
-2. Cài extension này
-3. Login Admin → Extensions → Migration Tool
-4. Tab Migrate → Upload ZIP
-5. Điền config → Start Migration
-6. Kiểm tra Logs
-7. Test website
-```
-
-## 🛠️ Cấu trúc Backup ZIP
-
-```
-flarum_backup_YYYY-MM-DD_HH-MM-SS.zip
-├── database.sql              # Full database dump
-├── settings.json             # All Flarum settings
-├── config.php               # Config file
-├── composer.json            # Composer dependencies
-├── composer.lock           
-├── .env                     # Environment file (if exists)
-├── metadata.json            # Backup metadata
-├── migrate.sh              # Auto migration script
-├── assets/                 # Uploaded files
-│   ├── avatars/
-│   └── files/
-└── storage/                # Extensions data
-    └── extensions/
-```
-
-## 📊 Metadata
-
-File `metadata.json` chứa thông tin:
-
-```json
-{
-  "version": "2.0",
-  "backup_date": "2026-01-30 14:30:00",
-  "flarum_version": "1.8.5",
-  "php_version": "8.2.0",
-  "mysql_version": "8.0.35",
-  "include_uploads": true,
-  "include_vendor": false,
-  "database_name": "flarum",
-  "url": "https://old-domain.com",
-  "extensions": [
-    {
-      "name": "flarum/tags",
-      "version": "^1.8",
-      "enabled": true
-    }
-  ],
-  "server_info": {
-    "os": "Linux",
-    "web_server": "nginx/1.24.0"
-  }
-}
-```
-
-## 🔒 Bảo mật
-
-- ⚠️ File backup chứa **toàn bộ database** bao gồm mật khẩu (đã hash)
-- ⚠️ File backup chứa **API keys** và **secrets** từ config
-- ⚠️ Không upload backup lên nơi công khai
-- ⚠️ Xóa backup cũ không còn sử dụng
-- ⚠️ Sử dụng HTTPS khi upload/download backup
-
-## 🐛 Troubleshooting
-
-### Lỗi: "Cannot create backup"
-```bash
-# Kiểm tra quyền
-chmod -R 775 storage
-chown -R www-data:www-data storage
-
-# Kiểm tra disk space
-df -h
-```
-
-### Lỗi: "Upload failed"
-```bash
-# Tăng upload limit trong php.ini
+**"Upload failed" (File too large)**
+Adjust your PHP settings:
+```ini
 upload_max_filesize = 512M
 post_max_size = 512M
-max_execution_time = 300
 ```
-
-### Lỗi: "Migration failed"
-```bash
-# Kiểm tra logs
-cat storage/logs/migration.log
-
-# Kiểm tra database credentials
-php flarum info
-```
-
-### Lỗi: "Composer install failed"
-```bash
-# Chạy thủ công
-composer install --no-dev --optimize-autoloader
-
-# Hoặc dùng memory limit cao hơn
-php -d memory_limit=512M $(which composer) install
-```
-
-### Frontend không build được
-```bash
-cd vendor/nauhyuh/flarum-migration-tool
-rm -rf node_modules
-npm install
-npm run build
-```
-
-## 📝 API Endpoints
-
-Extension cung cấp các API endpoints:
-
-```
-POST   /api/migration/backup/create       # Tạo backup
-GET    /api/migration/backup/list         # List backups
-GET    /api/migration/backup/download/:f  # Download backup
-DELETE /api/migration/backup/delete/:f    # Delete backup
-POST   /api/migration/upload               # Upload backup
-POST   /api/migration/migrate              # Start migration
-GET    /api/migration/status               # Get status
-GET    /api/migration/logs                 # Get logs
-POST   /api/migration/config/update        # Update config
-```
-
-## 🎨 Screenshots
-
-*Thêm screenshots của admin UI ở đây*
 
 ## 📄 License
 
-MIT License - xem file [LICENSE](LICENSE)
-
-## 🤝 Đóng góp
-
-Contributions, issues và feature requests đều được chào đón!
-
-## ⚡ Performance Tips
-
-1. **Backup lớn**: Nếu forum có nhiều uploads (>1GB):
-   - Backup không bao gồm uploads
-   - Sync uploads riêng bằng rsync:
-   ```bash
-   rsync -avz public/assets/ user@new-server:/path/to/flarum/public/assets/
-   ```
-
-2. **Composer**: Không nên backup vendor folder:
-   - Dùng `composer install` trên server mới nhanh hơn
-   - Giảm kích thước backup đáng kể
-
-3. **Database lớn**: Nếu database >100MB:
-   - Xem xét tăng timeout trong nginx/Apache
-   - Có thể export database thủ công nếu cần
-
-## 📞 Support
-
-- GitHub Issues: [Link to repo]
-- Flarum Community: [Link to discussion]
-- Email: your-email@example.com
+MIT License.
 
 ---
-
-Made with ❤️ for the Flarum community
+Made with ❤️ for the Flarum community.
