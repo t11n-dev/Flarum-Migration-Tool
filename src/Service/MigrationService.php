@@ -44,6 +44,7 @@ class MigrationService
         
         $timestamp = date('Y-m-d_H-i-s');
         $backupName = "flarum_backup_{$timestamp}";
+        // Use a temp dir inside storage to ensure write permissions
         $tempDir = storage_path('migration_temp/' . $backupName);
         
         try {
@@ -60,27 +61,9 @@ class MigrationService
             $this->log('Step 2: Exporting settings...');
             $this->exportSettings($tempDir . '/settings.json');
             
-            // 3. Copy application files
-            $this->log('Step 3: Copying Flarum files...');
-            $this->copyConfig($tempDir);
-            $this->copyComposerFiles($tempDir);
-            
-            if (file_exists(base_path('.env'))) {
-                copy(base_path('.env'), $tempDir . '/.env');
-            }
-
-            if ($includeUploads) {
-                $this->log(' -> Copying public/assets...');
-                $this->copyUploads($tempDir);
-            }
-
-            if ($includeVendor) {
-                $this->log(' -> Copying vendor directory...');
-                $this->copyVendor($tempDir);
-            }
-
-            $this->log(' -> Copying storage/extensions...');
-            $this->copyExtensionsData($tempDir);
+            // 3. Copy application files (All folders except specified exclusions)
+            $this->log('Step 3: Copying application files...');
+            $this->copySourceFiles($tempDir, $includeVendor);
 
             // 4. Create internal metadata
             $this->log('Step 4: Creating metadata and scripts...');
@@ -92,13 +75,16 @@ class MigrationService
             $zipPath = $this->backupPath . '/' . $backupName . '.zip';
             $this->createZip($tempDir, $zipPath);
 
+            // Set permissions for the zip file
+            chmod($zipPath, 0664);
+
             // Cleanup
             $this->log('Step 6: Cleaning up temp files...');
             $this->deleteDirectory(storage_path('migration_temp'));
             
             $size = filesize($zipPath);
             $sizeFormatted = $this->formatBytes($size);
-            $this->log("✓ SUCCESS! Backup for v4r.net created: {$backupName}.zip ({$sizeFormatted})");
+            $this->log("✓ SUCCESS! Backup created: {$backupName}.zip ({$sizeFormatted})");
 
             return [
                 'success' => true,
@@ -120,6 +106,51 @@ class MigrationService
     }
 
     /**
+     * Copy all files and folders from root, applying exclusions
+     */
+    protected function copySourceFiles($tempDir, $includeVendor)
+    {
+        $rootPath = base_path();
+        $items = scandir($rootPath);
+        
+        $exclude = ['current', 'storage', 'vendor', '.', '..', '.git', 'node_modules', 'migration_temp'];
+        if ($includeVendor) {
+            $exclude = array_diff($exclude, ['vendor']);
+        }
+
+        foreach ($items as $item) {
+            if (in_array($item, $exclude)) continue;
+
+            $src = $rootPath . '/' . $item;
+            $dst = $tempDir . '/' . $item;
+
+            if (is_dir($src)) {
+                $this->log(" -> Copying directory: {$item}");
+                $this->recursiveCopy($src, $dst);
+            } else {
+                copy($src, $dst);
+            }
+        }
+
+        // Special handling for storage: only copy non-temp/non-backup data
+        $this->log(" -> Copying essential storage data...");
+        $storagePath = storage_path();
+        $storageItems = array_diff(scandir($storagePath), ['.', '..', 'backups', 'logs', 'sessions', 'views', 'cache', 'migration_temp']);
+        
+        foreach ($storageItems as $sItem) {
+            $src = $storagePath . '/' . $sItem;
+            $dst = $tempDir . '/storage/' . $sItem;
+            
+            if (is_dir($src)) {
+                $this->recursiveCopy($src, $dst);
+            } else {
+                @mkdir(dirname($dst), 0755, true);
+                copy($src, $dst);
+            }
+        }
+    }
+
+    /**
      * Database Export Logic - Pure PHP (Most compatible)
      */
     protected function exportDatabase($filePath)
@@ -133,19 +164,16 @@ class MigrationService
             fwrite($handle, "-- Flarum Native PHP Backup\n-- Date: " . date('Y-m-d H:i:s') . "\n\nSET FOREIGN_KEY_CHECKS=0;\nSET NAMES utf8mb4;\n\n");
 
             $dbName = $this->db->getDatabaseName();
-            // Get tables using PHP
             $tables = $this->db->getPdo()->query('SHOW TABLES')->fetchAll(\PDO::FETCH_COLUMN);
 
             foreach ($tables as $tableName) {
-                $this->log("Exporting table: {$tableName}");
-
-                // Get Create Table - use associative to avoid case issues (Create Table vs create table)
+                // Get Create Table
                 $createStmt = $this->db->getPdo()->query("SHOW CREATE TABLE `{$tableName}`")->fetch(\PDO::FETCH_ASSOC);
-                $createSql = array_values($createStmt)[1]; // The 2nd column is always the SQL
+                $createSql = array_values($createStmt)[1];
 
                 fwrite($handle, "DROP TABLE IF EXISTS `{$tableName}`;\n" . $createSql . ";\n\n");
 
-                // Export data using raw PDO to avoid duplicated prefixes from Query Builder
+                // Export data using raw PDO to avoid duplicated prefixes
                 $count = 0;
                 $stmt = $this->db->getPdo()->query("SELECT * FROM `{$tableName}`");
 
@@ -161,13 +189,10 @@ class MigrationService
                 }
                 
                 fwrite($handle, "\n");
-                $this->log(" -> Exported {$count} rows from {$tableName}");
             }
 
             fwrite($handle, "SET FOREIGN_KEY_CHECKS=1;\n");
             fclose($handle);
-            $this->log("Native database export completed successfully.");
-            
             return true;
         } catch (\Throwable $e) {
             $this->log("PHP Export Error: " . $e->getMessage(), 'error');
@@ -175,45 +200,12 @@ class MigrationService
         }
     }
 
-    /**
-     * Filesystem Helpers
-     */
     protected function exportSettings($filePath)
     {
         $settings = $this->db->table('settings')->get();
         $data = [];
         foreach ($settings as $s) $data[$s->key] = $s->value;
         file_put_contents($filePath, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-    }
-
-    protected function copyConfig($tempDir)
-    {
-        if (file_exists(base_path('config.php'))) copy(base_path('config.php'), $tempDir . '/config.php');
-    }
-
-    protected function copyComposerFiles($tempDir)
-    {
-        foreach (['composer.json', 'composer.lock'] as $f) {
-            if (file_exists(base_path($f))) copy(base_path($f), $tempDir . '/' . $f);
-        }
-    }
-
-    protected function copyUploads($tempDir)
-    {
-        $src = public_path('assets');
-        if (is_dir($src)) $this->recursiveCopy($src, $tempDir . '/assets');
-    }
-
-    protected function copyVendor($tempDir)
-    {
-        $src = base_path('vendor');
-        if (is_dir($src)) $this->recursiveCopy($src, $tempDir . '/vendor');
-    }
-
-    protected function copyExtensionsData($tempDir)
-    {
-        $src = storage_path('extensions');
-        if (is_dir($src)) $this->recursiveCopy($src, $tempDir . '/storage/extensions');
     }
 
     protected function createMetadata($tempDir, $includeUploads, $includeVendor)
@@ -234,7 +226,6 @@ class MigrationService
 
     protected function createMigrationScript($tempDir)
     {
-        // Simple script for now
         $script = "#!/bin/bash\necho \"Flarum Restore Script\"\n";
         file_put_contents($tempDir . '/migrate.sh', $script);
         chmod($tempDir . '/migrate.sh', 0755);
@@ -277,17 +268,9 @@ class MigrationService
     {
         $filename = basename($filename);
         $p = $this->backupPath . '/' . $filename;
-        
-        if (!file_exists($p)) {
-            throw new \Exception("Backup file does not exist: $filename");
-        }
-
-        if (!unlink($p)) {
-            throw new \Exception("Failed to delete backup file: $filename. Check file permissions.");
-        }
-
+        if (!file_exists($p)) throw new \Exception("Backup file does not exist: $filename");
+        if (!unlink($p)) throw new \Exception("Failed to delete backup file: $filename. Check file permissions.");
         $this->log("Deleted backup: $filename");
-        
         return ['success' => true];
     }
 
