@@ -1,7 +1,7 @@
 {
     "name": "nauhyuh/flarum-migration-tool",
     "description": "Complete migration tool with admin UI for easy Flarum server transfer. Backup, restore, and migrate your forum with just a few clicks.",
-    "version": "2.2.0",
+    "version": "2.2.1",
     "type": "flarum-extension",
     "keywords": [
         "flarum",

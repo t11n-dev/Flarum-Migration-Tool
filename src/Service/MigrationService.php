@@ -311,4 +311,16 @@ class MigrationService
         for ($i = 0; $b > 1024 && $i < count($u) - 1; $i++) $b /= 1024;
         return round($b, $p) . ' ' . $u[$i];
     }
+
+    public function getCurrentConfig()
+    {
+        $config = app('flarum.config');
+        return [
+            'db_host' => $config['database']['host'] ?? 'localhost',
+            'db_name' => $config['database']['database'] ?? '',
+            'db_user' => $config['database']['username'] ?? '',
+            'db_pass' => $config['database']['password'] ?? '',
+            'url' => $config['url'] ?? '',
+        ];
+    }
 }

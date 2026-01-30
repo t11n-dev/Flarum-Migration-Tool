@@ -14,7 +14,7 @@ export default class MigrationPage extends ExtensionPage {
     this.includeUploads = true;
     this.includeVendor = false;
     this.logs = [];
-    
+
     // Migration settings
     this.uploadedFile = null;
     this.newUrl = '';
@@ -24,6 +24,31 @@ export default class MigrationPage extends ExtensionPage {
     this.dbPass = '';
 
     this.loadBackups();
+    this.loadStatus();
+  }
+
+  loadStatus() {
+    this.loading = true;
+
+    app
+      .request({
+        method: 'GET',
+        url: app.forum.attribute('apiUrl') + '/migration/status',
+      })
+      .then((response) => {
+        if (response.success && response.current_config) {
+          const config = response.current_config;
+          this.newUrl = this.newUrl || config.url;
+          this.dbHost = this.dbHost === 'localhost' ? config.db_host : this.dbHost;
+          this.dbName = this.dbName || config.db_name;
+          this.dbUser = this.dbUser || config.db_user;
+          this.dbPass = this.dbPass || config.db_pass;
+        }
+      })
+      .finally(() => {
+        this.loading = false;
+        m.redraw();
+      });
   }
 
   content() {
@@ -31,22 +56,22 @@ export default class MigrationPage extends ExtensionPage {
       <div className="MigrationPage">
         <div className="container">
           <h2>{app.translator.trans('migration-tool.admin.title')}</h2>
-          
+
           {/* Tabs */}
           <div className="MigrationTabs">
-            <button 
+            <button
               className={'Button ' + (this.activeTab === 'backup' ? 'Button--primary' : '')}
               onclick={() => this.switchTab('backup')}
             >
               {app.translator.trans('migration-tool.admin.tabs.backup')}
             </button>
-            <button 
+            <button
               className={'Button ' + (this.activeTab === 'migrate' ? 'Button--primary' : '')}
               onclick={() => this.switchTab('migrate')}
             >
               {app.translator.trans('migration-tool.admin.tabs.migrate')}
             </button>
-            <button 
+            <button
               className={'Button ' + (this.activeTab === 'logs' ? 'Button--primary' : '')}
               onclick={() => this.switchTab('logs')}
             >
@@ -71,7 +96,7 @@ export default class MigrationPage extends ExtensionPage {
         <div className="Form">
           <div className="Form-group">
             <label>{app.translator.trans('migration-tool.admin.backup.settings')}</label>
-            
+
             <Switch
               state={this.includeUploads}
               onchange={(value) => {
@@ -110,7 +135,7 @@ export default class MigrationPage extends ExtensionPage {
 
         <div className="BackupList">
           <h3>{app.translator.trans('migration-tool.admin.backup.list_title')}</h3>
-          
+
           {this.loading ? (
             <LoadingIndicator />
           ) : (
@@ -300,6 +325,8 @@ export default class MigrationPage extends ExtensionPage {
     this.activeTab = tab;
     if (tab === 'backup') {
       this.loadBackups();
+    } else if (tab === 'migrate') {
+      this.loadStatus();
     } else if (tab === 'logs') {
       this.loadLogs();
     }
