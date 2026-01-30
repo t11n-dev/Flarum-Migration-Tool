@@ -37,6 +37,10 @@ class MigrationService
      */
     public function createBackup($includeUploads = true, $includeVendor = false)
     {
+        // Increase limits for processing large files/databases
+        @set_time_limit(0);
+        @ini_set('memory_limit', '512M');
+
         $this->log('Starting backup creation...');
         
         $timestamp = date('Y-m-d_H-i-s');
