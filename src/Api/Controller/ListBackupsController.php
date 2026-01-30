@@ -22,7 +22,8 @@ class ListBackupsController implements RequestHandlerInterface
         try {
             $this->migrationService = new MigrationService();
 
-            $actor = RequestUtil::getActor($request);
+            $this->migrationService = new MigrationService();
+        $actor = RequestUtil::getActor($request);
             $actor->assertAdmin();
 
             $backups = $this->migrationService->listBackups();

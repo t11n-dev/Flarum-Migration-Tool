@@ -13,22 +13,28 @@ class GetLogsController implements RequestHandlerInterface
 {
     protected $migrationService;
 
-    public function __construct(MigrationService $migrationService)
+    public function __construct()
     {
-        $this->migrationService = $migrationService;
     }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
-        $actor = RequestUtil::getActor($request);
-        $actor->assertAdmin();
+        try {
+            $this->migrationService = new MigrationService();
+            $actor = RequestUtil::getActor($request);
+            $actor->assertAdmin();
 
-        $logs = $this->migrationService->getLogs(200);
+            $logs = $this->migrationService->getLogs(200);
 
-        return new JsonResponse([
-            'success' => true,
-            // Logs are array of strings, good for JSON
-            'logs' => $logs
-        ]);
+            return new JsonResponse([
+                'success' => true,
+                'logs' => $logs
+            ]);
+        } catch (\Throwable $e) {
+            return new JsonResponse([
+                'success' => false,
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 }

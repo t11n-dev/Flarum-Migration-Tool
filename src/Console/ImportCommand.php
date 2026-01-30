@@ -5,7 +5,7 @@ namespace Nauhyuh\MigrationTool\Console;
 use Flarum\Console\AbstractCommand;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
-use ZipArchive;
+use Nauhyuh\MigrationTool\Service\MigrationService;
 
 class ImportCommand extends AbstractCommand
 {
@@ -28,124 +28,65 @@ class ImportCommand extends AbstractCommand
             return 1;
         }
 
-        if (!$force) {
-            if (!$this->confirm('This will overwrite all existing data. Continue?', false)) {
-                $this->info('Import cancelled.');
-                return 0;
-            }
+        if (!$force && !$this->confirm('This will overwrite ALL existing data. Continue?', false)) {
+            $this->info('Import cancelled.');
+            return 0;
         }
 
         $this->info('Starting import...');
 
         try {
-            // Extract backup
+            $service = new MigrationService();
+            
+            // For import command, we assume we want to keep current config but import DB and assets
+            // We'll use service utilities for parts of it
+            
             $extractPath = storage_path('migration_import_' . time());
             mkdir($extractPath, 0755, true);
 
             $this->info('Extracting backup...');
-            $zip = new ZipArchive();
-            if ($zip->open($backupFile) !== true) {
-                throw new \Exception('Cannot open backup file');
-            }
+            $zip = new \ZipArchive();
+            if ($zip->open($backupFile) !== true) throw new \Exception('Cannot open backup file');
             $zip->extractTo($extractPath);
             $zip->close();
 
-            // Check metadata
-            $metadataPath = $extractPath . '/metadata.json';
-            if (file_exists($metadataPath)) {
-                $metadata = json_decode(file_get_contents($metadataPath), true);
-                $this->info("Backup from: {$metadata['backup_date']}");
-                $this->info("Flarum version: {$metadata['flarum_version']}");
-            }
-
-            // Import database
+            // Import DB using service
             $this->info('Importing database...');
-            $this->importDatabase($extractPath . '/database.sql');
+            $config = app('flarum.config');
+            $dbConfig = $config['database'];
+            
+            $service->importDatabase(
+                $extractPath . '/database.sql',
+                $dbConfig['host'],
+                $dbConfig['database'],
+                $dbConfig['username'],
+                $dbConfig['password']
+            );
 
-            // Copy files
+            // Copy assets
             if (is_dir($extractPath . '/assets')) {
                 $this->info('Copying assets...');
-                $this->recursiveCopy($extractPath . '/assets', public_path('assets'));
+                $service->recursiveCopy($extractPath . '/assets', public_path('assets'));
             }
 
-            // Copy storage
-            if (is_dir($extractPath . '/storage')) {
-                $this->info('Copying storage...');
-                $this->recursiveCopy($extractPath . '/storage/extensions', storage_path('extensions'));
+            // Copy extensions storage
+            if (is_dir($extractPath . '/storage/extensions')) {
+                $this->info('Copying extensions storage...');
+                $service->recursiveCopy($extractPath . '/storage/extensions', storage_path('extensions'));
             }
 
-            // Cleanup
-            $this->deleteDirectory($extractPath);
+            $service->deleteDirectory($extractPath);
 
             $this->info('✓ Import completed successfully!');
-            $this->warn('Please run: php flarum migrate');
-            $this->warn('Please run: php flarum cache:clear');
+            $this->warn('Running migrations and clearing cache...');
+            $this->call('migrate');
+            $this->call('cache:clear');
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->error('Import failed: ' . $e->getMessage());
             return 1;
         }
 
         return 0;
-    }
-
-    protected function importDatabase($sqlFile)
-    {
-        if (!file_exists($sqlFile)) {
-            throw new \Exception('Database file not found');
-        }
-
-        $db = app('flarum.db');
-        $sql = file_get_contents($sqlFile);
-
-        $statements = array_filter(
-            array_map('trim', explode(';', $sql)),
-            function($stmt) { return !empty($stmt); }
-        );
-
-        $db->beginTransaction();
-        try {
-            foreach ($statements as $statement) {
-                if (!empty($statement)) {
-                    $db->unprepared($statement);
-                }
-            }
-            $db->commit();
-        } catch (\Exception $e) {
-            $db->rollBack();
-            throw $e;
-        }
-    }
-
-    protected function recursiveCopy($src, $dst)
-    {
-        if (!is_dir($src)) return;
-        
-        $dir = opendir($src);
-        @mkdir($dst, 0755, true);
-        
-        while (($file = readdir($dir)) !== false) {
-            if ($file != '.' && $file != '..') {
-                if (is_dir($src . '/' . $file)) {
-                    $this->recursiveCopy($src . '/' . $file, $dst . '/' . $file);
-                } else {
-                    copy($src . '/' . $file, $dst . '/' . $file);
-                }
-            }
-        }
-        
-        closedir($dir);
-    }
-
-    protected function deleteDirectory($dir)
-    {
-        if (!is_dir($dir)) return;
-        
-        $files = array_diff(scandir($dir), ['.', '..']);
-        foreach ($files as $file) {
-            $path = $dir . '/' . $file;
-            is_dir($path) ? $this->deleteDirectory($path) : unlink($path);
-        }
-        rmdir($dir);
     }
 }

@@ -8,6 +8,7 @@ use Laminas\Diactoros\Response\JsonResponse;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use Laminas\Diactoros\Stream;
 
 class DownloadBackupController implements RequestHandlerInterface
 {
@@ -23,13 +24,11 @@ class DownloadBackupController implements RequestHandlerInterface
             return new JsonResponse(['error' => 'Backup not found'], 404);
         }
 
-        $response = new Response();
-        $response = $response->withHeader('Content-Type', 'application/zip');
-        $response = $response->withHeader('Content-Disposition', 'attachment; filename="' . $filename . '"');
-        $response = $response->withHeader('Content-Length', filesize($backupPath));
-        
-        $response->getBody()->write(file_get_contents($backupPath));
+        $stream = new Stream($backupPath, 'r');
 
-        return $response;
+        return (new Response($stream))
+            ->withHeader('Content-Type', 'application/zip')
+            ->withHeader('Content-Disposition', 'attachment; filename="' . $filename . '"')
+            ->withHeader('Content-Length', filesize($backupPath));
     }
 }

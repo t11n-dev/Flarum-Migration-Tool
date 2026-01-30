@@ -23,7 +23,8 @@ class CreateBackupController implements RequestHandlerInterface
         try {
             $this->migrationService = new MigrationService();
 
-            $actor = RequestUtil::getActor($request);
+            $this->migrationService = new MigrationService();
+        $actor = RequestUtil::getActor($request);
             $actor->assertAdmin();
 
             $body = $request->getParsedBody();

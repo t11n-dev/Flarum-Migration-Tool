@@ -13,13 +13,14 @@ class DeleteBackupController implements RequestHandlerInterface
 {
     protected $migrationService;
 
-    public function __construct(MigrationService $migrationService)
+    public function __construct()
     {
-        $this->migrationService = $migrationService;
+        
     }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
+        $this->migrationService = new MigrationService();
         $actor = RequestUtil::getActor($request);
         $actor->assertAdmin();
 

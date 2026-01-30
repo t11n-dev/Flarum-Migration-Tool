@@ -13,6 +13,7 @@ class UpdateConfigController implements RequestHandlerInterface
 {
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
+        $this->migrationService = new MigrationService();
         $actor = RequestUtil::getActor($request);
         $actor->assertAdmin();
 

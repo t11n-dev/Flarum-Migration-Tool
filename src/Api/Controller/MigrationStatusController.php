@@ -13,15 +13,16 @@ class MigrationStatusController implements RequestHandlerInterface
 {
     protected $migrationService;
 
-    public function __construct(MigrationService $migrationService)
+    public function __construct()
     {
-        $this->migrationService = $migrationService;
+        
     }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
         try {
-            $actor = RequestUtil::getActor($request);
+            $this->migrationService = new MigrationService();
+        $actor = RequestUtil::getActor($request);
             $actor->assertAdmin();
 
             $uploadPath = storage_path('migration_upload');
