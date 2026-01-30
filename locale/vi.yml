@@ -1,0 +1,50 @@
+migration-tool:
+  admin:
+    title: Công cụ Di chuyển
+    
+    tabs:
+      backup: Sao lưu
+      migrate: Di chuyển
+      logs: Nhật ký
+    
+    backup:
+      settings: Cài đặt Sao lưu
+      include_uploads: Bao gồm các file tải lên (avatar, tệp đính kèm)
+      include_vendor: Bao gồm thư mục vendor (không khuyến khích - hãy dùng composer install)
+      help: Tạo bản sao lưu hoàn chỉnh của diễn đàn Flarum. Bản sao lưu sẽ bao gồm database, settings, config và tùy chọn các file tải lên.
+      create_button: Tạo Bản Sao Lưu
+      success: Tạo bản sao lưu thành công!
+      
+      list_title: Các Bản Sao Lưu
+      filename: Tên file
+      size: Kích thước
+      created: Ngày tạo
+      actions: Thao tác
+      no_backups: Không có bản sao lưu nào
+      download: Tải xuống
+      delete: Xóa
+      delete_confirm: Bạn có chắc chắn muốn xóa bản sao lưu này?
+      deleted: Đã xóa bản sao lưu thành công
+    
+    migrate:
+      warning: ⚠️ Cảnh báo
+      warning_text: Quá trình di chuyển sẽ ghi đè toàn bộ dữ liệu hiện tại trên server này. Hãy chắc chắn bạn đã sao lưu trước khi tiếp tục!
+      
+      upload_label: Tải lên File Sao lưu
+      uploaded: File đã tải lên
+      upload_success: Tải file lên thành công
+      
+      config_title: Cấu hình Server
+      new_url: URL Website Mới
+      db_host: Database Host
+      db_name: Tên Database
+      db_user: Tên đăng nhập Database
+      db_pass: Mật khẩu Database
+      
+      start_button: Bắt đầu Di chuyển
+      confirm: Thao tác này sẽ ghi đè toàn bộ dữ liệu hiện tại. Bạn có chắc chắn?
+      success: Di chuyển hoàn tất thành công! Vui lòng kiểm tra nhật ký để biết chi tiết.
+    
+    logs:
+      refresh: Làm mới Nhật ký
+      no_logs: Không có nhật ký

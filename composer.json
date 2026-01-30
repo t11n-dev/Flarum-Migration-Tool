@@ -1,0 +1,68 @@
+{
+    "name": "nauhyuh/flarum-migration-tool",
+    "description": "Complete migration tool with admin UI for easy Flarum server transfer. Backup, restore, and migrate your forum with just a few clicks.",
+    "version": "2.0.0",
+    "type": "flarum-extension",
+    "keywords": [
+        "flarum",
+        "extension",
+        "migration",
+        "backup",
+        "restore",
+        "transfer",
+        "server migration",
+        "admin ui"
+    ],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Nauhyuh",
+            "email": "nauhyuh@gmail.com",
+            "homepage": "https://github.com/nauhyuh"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/nauhyuh/flarum-migration-tool/issues",
+        "source": "https://github.com/nauhyuh/flarum-migration-tool",
+        "forum": "https://discuss.flarum.org/d/your-discussion-id"
+    },
+    "homepage": "https://github.com/nauhyuh/flarum-migration-tool",
+    "funding": [
+        {
+            "type": "github",
+            "url": "https://github.com/sponsors/nauhyuh"
+        }
+    ],
+    "require": {
+        "flarum/core": "^1.0"
+    },
+    "require-dev": {
+        "flarum/testing": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Nauhyuh\\MigrationTool\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Nauhyuh\\MigrationTool\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "flarum-extension": {
+            "title": "Migration Tool",
+            "category": "administration",
+            "icon": {
+                "name": "fas fa-exchange-alt",
+                "backgroundColor": "#3498db",
+                "color": "#fff"
+            }
+        },
+        "flagrow": {
+            "discuss": "https://discuss.flarum.org/d/your-discussion-id"
+        }
+    },
+    "minimum-stability": "beta",
+    "prefer-stable": true
+}
