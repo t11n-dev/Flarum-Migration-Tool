@@ -145,25 +145,21 @@ class MigrationService
 
                 fwrite($handle, "DROP TABLE IF EXISTS `{$tableName}`;\n" . $createSql . ";\n\n");
 
-                // Export data in chunks to save memory
+                // Export data using cursor to save memory and avoid orderBy requirement
                 $count = 0;
-                $this->db->table($tableName)->chunk(1000, function ($rows) use ($handle, $tableName, &$count) {
-                    if ($rows->isEmpty()) return;
+                $rows = $this->db->table($tableName)->cursor();
 
-                    foreach ($rows as $row) {
-                        $rowArray = (array)$row;
-                        $columns = array_keys($rowArray);
-                        $values = array_map(function($value) {
-                            if ($value === null) return 'NULL';
-                            // Use PDO quote to handle strings and special characters safely
-                            return $this->db->getPdo()->quote($value);
-                        }, array_values($rowArray));
+                foreach ($rows as $row) {
+                    $rowArray = (array)$row;
+                    $columns = array_keys($rowArray);
+                    $values = array_map(function($value) {
+                        return $value === null ? 'NULL' : $this->db->getPdo()->quote($value);
+                    }, array_values($rowArray));
 
-                        $sql = "INSERT INTO `{$tableName}` (`" . implode("`, `", $columns) . "`) VALUES (" . implode(", ", $values) . ");\n";
-                        fwrite($handle, $sql);
-                        $count++;
-                    }
-                });
+                    $sql = "INSERT INTO `{$tableName}` (`" . implode("`, `", $columns) . "`) VALUES (" . implode(", ", $values) . ");\n";
+                    fwrite($handle, $sql);
+                    $count++;
+                }
                 
                 fwrite($handle, "\n");
                 $this->log(" -> Exported {$count} rows from {$tableName}");
