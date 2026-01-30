@@ -13,6 +13,7 @@ export default class MigrationPage extends ExtensionPage {
     this.backups = [];
     this.includeUploads = true;
     this.includeVendor = false;
+    this.includeConfig = false;
     this.logs = [];
 
     // Migration settings
@@ -113,6 +114,15 @@ export default class MigrationPage extends ExtensionPage {
               }}
             >
               {app.translator.trans('migration-tool.admin.backup.include_vendor')}
+            </Switch>
+
+            <Switch
+              state={this.includeConfig}
+              onchange={(value) => {
+                this.includeConfig = value;
+              }}
+            >
+              {app.translator.trans('migration-tool.admin.backup.include_config')}
             </Switch>
 
             <p className="helpText">
@@ -342,6 +352,7 @@ export default class MigrationPage extends ExtensionPage {
         body: {
           include_uploads: this.includeUploads,
           include_vendor: this.includeVendor,
+          include_config: this.includeConfig,
         },
       })
       .then((response) => {

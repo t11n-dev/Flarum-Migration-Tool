@@ -35,7 +35,7 @@ class MigrationService
     /**
      * Create a full backup as ZIP
      */
-    public function createBackup($includeUploads = true, $includeVendor = false)
+    public function createBackup($includeUploads = true, $includeVendor = false, $includeConfig = false)
     {
         @set_time_limit(0);
         @ini_set('memory_limit', '1024M');
@@ -44,7 +44,6 @@ class MigrationService
         
         $timestamp = date('Y-m-d_H-i-s');
         $backupName = "flarum_backup_{$timestamp}";
-        // Use a temp dir inside storage to ensure write permissions
         $tempDir = storage_path('migration_temp/' . $backupName);
         
         try {
@@ -61,9 +60,9 @@ class MigrationService
             $this->log('Step 2: Exporting settings...');
             $this->exportSettings($tempDir . '/settings.json');
             
-            // 3. Copy application files (All folders except specified exclusions)
+            // 3. Copy application files
             $this->log('Step 3: Copying application files...');
-            $this->copySourceFiles($tempDir, $includeVendor);
+            $this->copySourceFiles($tempDir, $includeVendor, $includeConfig);
 
             // 4. Create internal metadata
             $this->log('Step 4: Creating metadata and scripts...');
@@ -75,10 +74,8 @@ class MigrationService
             $zipPath = $this->backupPath . '/' . $backupName . '.zip';
             $this->createZip($tempDir, $zipPath);
 
-            // Set permissions for the zip file
             chmod($zipPath, 0664);
 
-            // Cleanup
             $this->log('Step 6: Cleaning up temp files...');
             $this->deleteDirectory(storage_path('migration_temp'));
             
@@ -108,14 +105,19 @@ class MigrationService
     /**
      * Copy all files and folders from root, applying exclusions
      */
-    protected function copySourceFiles($tempDir, $includeVendor)
+    protected function copySourceFiles($tempDir, $includeVendor, $includeConfig = false)
     {
         $rootPath = base_path();
         $items = scandir($rootPath);
         
-        $exclude = ['current', 'storage', 'vendor', '.', '..', '.git', 'node_modules', 'migration_temp'];
+        $exclude = ['current', 'storage', 'vendor', '.', '..', '.git', 'node_modules', 'migration_temp', 'migration_upload'];
+        
         if ($includeVendor) {
             $exclude = array_diff($exclude, ['vendor']);
+        }
+        
+        if (!$includeConfig) {
+            $exclude[] = 'config.php';
         }
 
         foreach ($items as $item) {
@@ -132,10 +134,10 @@ class MigrationService
             }
         }
 
-        // Special handling for storage: only copy non-temp/non-backup data
+        // Special handling for storage: essential data only
         $this->log(" -> Copying essential storage data...");
         $storagePath = storage_path();
-        $storageItems = array_diff(scandir($storagePath), ['.', '..', 'backups', 'logs', 'sessions', 'views', 'cache', 'migration_temp']);
+        $storageItems = array_diff(scandir($storagePath), ['.', '..', 'backups', 'logs', 'sessions', 'views', 'cache', 'migration_temp', 'migration_upload']);
         
         foreach ($storageItems as $sItem) {
             $src = $storagePath . '/' . $sItem;
@@ -151,6 +153,186 @@ class MigrationService
     }
 
     /**
+     * Perform the actual migration/restore
+     */
+    public function performMigration($zipPath, $configData)
+    {
+        @set_time_limit(0);
+        @ini_set('memory_limit', '1024M');
+
+        if (!file_exists($zipPath)) {
+            throw new \Exception("Backup file not found at: " . $zipPath);
+        }
+
+        $this->log("Starting migration process from: " . basename($zipPath));
+        $extractDir = storage_path('migration_temp/' . uniqid('extract_'));
+
+        try {
+            // 1. Extract backup
+            $this->log("Step 1: Extracting backup...");
+            $zip = new ZipArchive();
+            if ($zip->open($zipPath) !== true) {
+                throw new \Exception("Could not open ZIP file.");
+            }
+            mkdir($extractDir, 0755, true);
+            $zip->extractTo($extractDir);
+            $zip->close();
+
+            // 2. Database Import (Replace old DB with new DB)
+            $this->log("Step 2: Replacing database...");
+            $sqlFile = $extractDir . '/database.sql';
+            if (file_exists($sqlFile)) {
+                $this->importDatabase(
+                    $sqlFile, 
+                    $configData['db_host'], 
+                    $configData['db_name'], 
+                    $configData['db_user'], 
+                    $configData['db_pass']
+                );
+            }
+
+            // 3. File Replacement (Total replacement except config.php)
+            $this->log("Step 3: Replacing files and folders (Total Replacement)...");
+            $this->replaceFilesFromBackup($extractDir);
+
+            // 4. Update config.php
+            $this->log("Step 4: Updating configuration...");
+            $this->updateConfig($configData);
+
+            // Final Cleanup
+            $this->deleteDirectory($extractDir);
+            $this->log("✓ MIGRATION SUCCESSFUL!");
+
+            return [
+                'success' => true,
+                'message' => 'Migration completed successfully.'
+            ];
+
+        } catch (\Throwable $e) {
+            $this->log("FATAL ERROR DURING MIGRATE: " . $e->getMessage(), "error");
+            if (is_dir($extractDir)) $this->deleteDirectory($extractDir);
+            throw $e;
+        }
+    }
+
+    /**
+     * Import database: drop tables first to "replace" the DB
+     */
+    protected function importDatabase($sqlFile, $host, $database, $username, $password)
+    {
+        $this->log("Importing database into {$database} @ {$host}...");
+        
+        $pdo = new \PDO("mysql:host={$host};dbname={$database}", $username, $password, [
+            \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+            \PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4"
+        ]);
+
+        $sql = file_get_contents($sqlFile);
+        $sql = preg_replace('/--.*$/m', '', $sql);
+        $sql = preg_replace('/\/\*.*?\*\//s', '', $sql);
+        
+        $statements = explode(";\n", $sql);
+        
+        $pdo->exec("SET FOREIGN_KEY_CHECKS=0");
+        
+        // Drop existing tables to ensure "replacement"
+        $this->log(" -> Clearing existing tables...");
+        $tables = $pdo->query('SHOW TABLES')->fetchAll(\PDO::FETCH_COLUMN);
+        foreach ($tables as $table) {
+            $pdo->exec("DROP TABLE IF EXISTS `{$table}`");
+        }
+
+        $this->log(" -> Executing SQL dump...");
+        foreach ($statements as $statement) {
+            $statement = trim($statement);
+            if (!empty($statement)) {
+                $pdo->exec($statement);
+            }
+        }
+        $pdo->exec("SET FOREIGN_KEY_CHECKS=1");
+
+        $this->log("Database imported successfully.");
+    }
+
+    /**
+     * Replace all files in root with backup files (Total Replacement except config.php)
+     */
+    protected function replaceFilesFromBackup($extractDir)
+    {
+        $rootPath = base_path();
+        
+        // 1. Delete everything in root EXCEPT protected items and config.php
+        $this->log(" -> Cleaning up current directories...");
+        $protected = ['storage', 'config.php', 'vendor', '.git', 'node_modules', '.env'];
+        $itemsInRoot = scandir($rootPath);
+        
+        foreach ($itemsInRoot as $item) {
+            if (in_array($item, $protected) || $item === '.' || $item === '..') continue;
+            
+            $p = $rootPath . '/' . $item;
+            if (is_dir($p)) {
+                $this->deleteDirectory($p);
+            } else {
+                @unlink($p);
+            }
+        }
+
+        // 2. Copy items from backup to root
+        $this->log(" -> Copying new files from backup...");
+        $backupItems = array_diff(scandir($extractDir), ['.', '..', 'database.sql', 'settings.json', 'metadata.json', 'migrate.sh', 'config.php', 'storage']);
+
+        foreach ($backupItems as $item) {
+            $src = $extractDir . '/' . $item;
+            $dst = $rootPath . '/' . $item;
+
+            if (is_dir($src)) {
+                $this->recursiveCopy($src, $dst);
+            } else {
+                copy($src, $dst);
+            }
+        }
+        
+        // 3. Special handling for storage/assets (replace)
+        $this->log(" -> Replacing storage/assets...");
+        $srcAssets = $extractDir . '/storage/assets';
+        if (is_dir($srcAssets)) {
+            $dstAssets = $rootPath . '/public/assets'; // Flarum web assets are often in public/assets or assets depending on setup
+            // Compatibility: Flarum 1.x usually has assets in public/assets
+            if (!is_dir($dstAssets)) $dstAssets = base_path('assets');
+            
+            if (is_dir($dstAssets)) $this->deleteDirectory($dstAssets);
+            $this->recursiveCopy($srcAssets, $dstAssets);
+        }
+        
+        // 4. Other storage data (extensions, etc)
+        if (is_dir($extractDir . '/storage')) {
+            $this->log(" -> Merging other storage data...");
+            $this->recursiveCopy($extractDir . '/storage', $rootPath . '/storage');
+        }
+    }
+
+    /**
+     * Update existing config.php safely
+     */
+    public function updateConfig($data)
+    {
+        $configPath = base_path('config.php');
+        if (!file_exists($configPath)) return;
+
+        $config = include $configPath;
+        
+        if (!empty($data['db_host'])) $config['database']['host'] = $data['db_host'];
+        if (!empty($data['db_name'])) $config['database']['database'] = $data['db_name'];
+        if (!empty($data['db_user'])) $config['database']['username'] = $data['db_user'];
+        if (!empty($data['db_pass'])) $config['database']['password'] = $data['db_pass'];
+        if (!empty($data['new_url'])) $config['url'] = $data['new_url'];
+
+        $content = "<?php return " . var_export($config, true) . ";";
+        file_put_contents($configPath, $content);
+        $this->log("Configuration updated in config.php");
+    }
+
+    /**
      * Database Export Logic - Pure PHP (Most compatible)
      */
     protected function exportDatabase($filePath)
@@ -163,20 +345,15 @@ class MigrationService
 
             fwrite($handle, "-- Flarum Native PHP Backup\n-- Date: " . date('Y-m-d H:i:s') . "\n\nSET FOREIGN_KEY_CHECKS=0;\nSET NAMES utf8mb4;\n\n");
 
-            $dbName = $this->db->getDatabaseName();
             $tables = $this->db->getPdo()->query('SHOW TABLES')->fetchAll(\PDO::FETCH_COLUMN);
 
             foreach ($tables as $tableName) {
-                // Get Create Table
                 $createStmt = $this->db->getPdo()->query("SHOW CREATE TABLE `{$tableName}`")->fetch(\PDO::FETCH_ASSOC);
                 $createSql = array_values($createStmt)[1];
 
                 fwrite($handle, "DROP TABLE IF EXISTS `{$tableName}`;\n" . $createSql . ";\n\n");
 
-                // Export data using raw PDO to avoid duplicated prefixes
-                $count = 0;
                 $stmt = $this->db->getPdo()->query("SELECT * FROM `{$tableName}`");
-
                 while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
                     $columns = array_keys($row);
                     $values = array_map(function($value) {
@@ -185,9 +362,7 @@ class MigrationService
 
                     $sql = "INSERT INTO `{$tableName}` (`" . implode("`, `", $columns) . "`) VALUES (" . implode(", ", $values) . ");\n";
                     fwrite($handle, $sql);
-                    $count++;
                 }
-                
                 fwrite($handle, "\n");
             }
 

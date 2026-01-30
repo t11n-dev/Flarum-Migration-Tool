@@ -11,7 +11,8 @@ migration-tool:
       settings: Backup Settings
       include_uploads: Include uploaded files (avatars, attachments)
       include_vendor: Include vendor directory (not recommended - use composer install instead)
-      help: Create a complete backup of your Flarum forum. The backup will include database, settings, config, and optionally uploaded files.
+      include_config: Include config.php (contains database credentials)
+      help: Create a complete backup of your Flarum forum. The backup will include database, settings, and optionally uploaded files or config.php.
       create_button: Create Backup
       success: Backup created successfully!
       
