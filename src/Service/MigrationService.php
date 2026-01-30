@@ -14,6 +14,7 @@ class MigrationService
     protected $files;
     protected $backupPath;
     protected $logPath;
+    protected $progressPath;
 
     public function __construct()
     {
@@ -22,6 +23,7 @@ class MigrationService
         $this->files = new Filesystem();
         $this->backupPath = storage_path('backups');
         $this->logPath = storage_path('logs/migration.log');
+        $this->progressPath = storage_path('logs/migration_progress.json');
         
         if (!is_dir($this->backupPath)) {
             @mkdir($this->backupPath, 0755, true);
@@ -33,6 +35,31 @@ class MigrationService
     }
 
     /**
+     * Update progress status
+     */
+    public function updateProgress($status, $percent, $label)
+    {
+        $data = [
+            'status' => $status,
+            'percent' => $percent,
+            'label' => $label,
+            'updated_at' => time()
+        ];
+        file_put_contents($this->progressPath, json_encode($data));
+    }
+
+    /**
+     * Get current progress
+     */
+    public function getProgress()
+    {
+        if (!file_exists($this->progressPath)) {
+            return ['status' => 'idle', 'percent' => 0, 'label' => ''];
+        }
+        return json_decode(file_get_contents($this->progressPath), true);
+    }
+
+    /**
      * Create a full backup as ZIP
      */
     public function createBackup($includeUploads = true, $includeVendor = false, $includeConfig = false)
@@ -40,6 +67,7 @@ class MigrationService
         @set_time_limit(0);
         @ini_set('memory_limit', '1024M');
 
+        $this->updateProgress('running', 5, 'Initializing backup...');
         $this->log('Starting backup creation process...');
         
         $timestamp = date('Y-m-d_H-i-s');
@@ -50,38 +78,45 @@ class MigrationService
             if (!is_dir($tempDir)) {
                 mkdir($tempDir, 0755, true);
             }
-            $this->log("Working in temp directory: {$tempDir}");
 
             // 1. Export database
+            $this->updateProgress('running', 10, 'Exporting database...');
             $this->log('Step 1: Exporting database...');
             $this->exportDatabase($tempDir . '/database.sql');
             
             // 2. Export settings
+            $this->updateProgress('running', 25, 'Exporting settings...');
             $this->log('Step 2: Exporting settings...');
             $this->exportSettings($tempDir . '/settings.json');
             
             // 3. Copy application files
+            $this->updateProgress('running', 40, 'Copying application files (this may take a while)...');
             $this->log('Step 3: Copying application files...');
             $this->copySourceFiles($tempDir, $includeVendor, $includeConfig);
 
             // 4. Create internal metadata
+            $this->updateProgress('running', 70, 'Creating metadata...');
             $this->log('Step 4: Creating metadata and scripts...');
             $this->createMetadata($tempDir, $includeUploads, $includeVendor);
             $this->createMigrationScript($tempDir);
 
             // 5. Pack everything
+            $this->updateProgress('running', 80, 'Compressing to ZIP...');
             $this->log('Step 5: Compressing to ZIP...');
             $zipPath = $this->backupPath . '/' . $backupName . '.zip';
             $this->createZip($tempDir, $zipPath);
 
             chmod($zipPath, 0664);
 
+            $this->updateProgress('running', 95, 'Cleaning up temp files...');
             $this->log('Step 6: Cleaning up temp files...');
             $this->deleteDirectory(storage_path('migration_temp'));
             
             $size = filesize($zipPath);
             $sizeFormatted = $this->formatBytes($size);
             $this->log("✓ SUCCESS! Backup created: {$backupName}.zip ({$sizeFormatted})");
+
+            $this->updateProgress('complete', 100, 'Backup finished!');
 
             return [
                 'success' => true,
@@ -93,11 +128,83 @@ class MigrationService
             ];
 
         } catch (\Throwable $e) {
+            $this->updateProgress('error', 0, 'Backup failed: ' . $e->getMessage());
             $this->log('FATAL ERROR: ' . $e->getMessage(), 'error');
-            $this->log('Trace: ' . $e->getTraceAsString(), 'error');
             if (is_dir($tempDir)) {
                 $this->deleteDirectory($tempDir);
             }
+            throw $e;
+        }
+    }
+
+    /**
+     * Perform the actual migration/restore
+     */
+    public function performMigration($zipPath, $configData)
+    {
+        @set_time_limit(0);
+        @ini_set('memory_limit', '1024M');
+
+        if (!file_exists($zipPath)) {
+            throw new \Exception("Backup file not found at: " . $zipPath);
+        }
+
+        $this->updateProgress('running', 5, 'Starting migration...');
+        $this->log("Starting migration process from: " . basename($zipPath));
+        $extractDir = storage_path('migration_temp/' . uniqid('extract_'));
+
+        try {
+            // 1. Extract backup
+            $this->updateProgress('running', 15, 'Extracting backup...');
+            $this->log("Step 1: Extracting backup...");
+            $zip = new ZipArchive();
+            if ($zip->open($zipPath) !== true) {
+                throw new \Exception("Could not open ZIP file.");
+            }
+            mkdir($extractDir, 0755, true);
+            $zip->extractTo($extractDir);
+            $zip->close();
+
+            // 2. Database Import
+            $this->updateProgress('running', 35, 'Importing database...');
+            $this->log("Step 2: Replacing database (Safety mode)...");
+            $sqlFile = $extractDir . '/database.sql';
+            if (file_exists($sqlFile)) {
+                $this->importDatabase(
+                    $sqlFile, 
+                    $configData['db_host'], 
+                    $configData['db_name'], 
+                    $configData['db_user'], 
+                    $configData['db_pass']
+                );
+            }
+
+            // 3. File Replacement
+            $this->updateProgress('running', 60, 'Replacing files and folders (Safety mode)...');
+            $this->log("Step 3: Replacing files and folders (Safety: renaming existing items to _old)...");
+            $this->replaceFilesFromBackup($extractDir);
+
+            // 4. Update config.php
+            $this->updateProgress('running', 85, 'Updating configuration...');
+            $this->log("Step 4: Updating configuration...");
+            $this->updateConfig($configData);
+
+            // Final Cleanup
+            $this->updateProgress('running', 95, 'Finalizing...');
+            $this->deleteDirectory($extractDir);
+            $this->log("✓ MIGRATION SUCCESSFUL!");
+
+            $this->updateProgress('complete', 100, 'Migration finished!');
+
+            return [
+                'success' => true,
+                'message' => 'Migration completed successfully. Old files have been renamed to _old.'
+            ];
+
+        } catch (\Throwable $e) {
+            $this->updateProgress('error', 0, 'Migration failed: ' . $e->getMessage());
+            $this->log("FATAL ERROR DURING MIGRATE: " . $e->getMessage(), "error");
+            if (is_dir($extractDir)) $this->deleteDirectory($extractDir);
             throw $e;
         }
     }
@@ -121,14 +228,12 @@ class MigrationService
         }
 
         foreach ($items as $item) {
-            // Skip protected items and anything ending with _old
             if (in_array($item, $exclude) || str_ends_with($item, '_old')) continue;
 
             $src = $rootPath . '/' . $item;
             $dst = $tempDir . '/' . $item;
 
             if (is_dir($src)) {
-                $this->log(" -> Copying directory: {$item}");
                 $this->recursiveCopy($src, $dst);
             } else {
                 copy($src, $dst);
@@ -136,7 +241,6 @@ class MigrationService
         }
 
         // Special handling for storage: essential data only
-        $this->log(" -> Copying essential storage data...");
         $storagePath = storage_path();
         $storageItems = array_diff(scandir($storagePath), ['.', '..', 'backups', 'logs', 'sessions', 'views', 'cache', 'migration_temp', 'migration_upload']);
         
@@ -151,69 +255,6 @@ class MigrationService
                 @mkdir(dirname($dst), 0755, true);
                 copy($src, $dst);
             }
-        }
-    }
-
-    /**
-     * Perform the actual migration/restore
-     */
-    public function performMigration($zipPath, $configData)
-    {
-        @set_time_limit(0);
-        @ini_set('memory_limit', '1024M');
-
-        if (!file_exists($zipPath)) {
-            throw new \Exception("Backup file not found at: " . $zipPath);
-        }
-
-        $this->log("Starting migration process from: " . basename($zipPath));
-        $extractDir = storage_path('migration_temp/' . uniqid('extract_'));
-
-        try {
-            // 1. Extract backup
-            $this->log("Step 1: Extracting backup...");
-            $zip = new ZipArchive();
-            if ($zip->open($zipPath) !== true) {
-                throw new \Exception("Could not open ZIP file.");
-            }
-            mkdir($extractDir, 0755, true);
-            $zip->extractTo($extractDir);
-            $zip->close();
-
-            // 2. Database Import
-            $this->log("Step 2: Replacing database (Safety mode)...");
-            $sqlFile = $extractDir . '/database.sql';
-            if (file_exists($sqlFile)) {
-                $this->importDatabase(
-                    $sqlFile, 
-                    $configData['db_host'], 
-                    $configData['db_name'], 
-                    $configData['db_user'], 
-                    $configData['db_pass']
-                );
-            }
-
-            // 3. File Replacement (Safety mode: rename to _old)
-            $this->log("Step 3: Replacing files and folders (Safety: renaming existing items to _old)...");
-            $this->replaceFilesFromBackup($extractDir);
-
-            // 4. Update config.php
-            $this->log("Step 4: Updating configuration...");
-            $this->updateConfig($configData);
-
-            // Final Cleanup of extraction temp
-            $this->deleteDirectory($extractDir);
-            $this->log("✓ MIGRATION SUCCESSFUL! Existing items renamed with _old suffix.");
-
-            return [
-                'success' => true,
-                'message' => 'Migration completed successfully. Old files have been renamed to _old.'
-            ];
-
-        } catch (\Throwable $e) {
-            $this->log("FATAL ERROR DURING MIGRATE: " . $e->getMessage(), "error");
-            if (is_dir($extractDir)) $this->deleteDirectory($extractDir);
-            throw $e;
         }
     }
 
@@ -242,7 +283,6 @@ class MigrationService
         }
 
         $this->log(" -> Executing SQL dump...");
-        // Split by semicolon followed by newline to get individual statements
         $statements = explode(";\n", $sql);
         foreach ($statements as $statement) {
             $statement = trim($statement);
@@ -250,7 +290,6 @@ class MigrationService
                 try {
                     $pdo->exec($statement);
                 } catch (\Exception $e) {
-                    // Log but continue if possible
                     $this->log("SQL Exec warning: " . substr($e->getMessage(), 0, 100), "warning");
                 }
             }
@@ -267,7 +306,6 @@ class MigrationService
     {
         $rootPath = base_path();
         
-        // 1. Rename existing items in root to _old
         $this->log(" -> Backing up current root items to _old...");
         $protected = ['storage', 'config.php', 'vendor', '.git', 'node_modules', '.env', 'migration_temp', 'migration_upload'];
         $itemsInRoot = scandir($rootPath);
@@ -286,7 +324,6 @@ class MigrationService
             @rename($oldPath, $newPath);
         }
 
-        // 2. Copy items from backup to root
         $this->log(" -> Copying new files from backup...");
         $backupItems = array_diff(scandir($extractDir), ['.', '..', 'database.sql', 'settings.json', 'metadata.json', 'migrate.sh', 'config.php', 'storage']);
 
@@ -301,11 +338,8 @@ class MigrationService
             }
         }
         
-        // 3. Handle storage assets - safety first
         $this->log(" -> Updating assets (safety: renaming old to _old)...");
         $srcAssets = $extractDir . '/storage/assets';
-        
-        // Flarum assets can be in base/assets or public/assets
         $assetPaths = [public_path('assets'), base_path('assets')];
         
         foreach ($assetPaths as $dstAssets) {
@@ -317,7 +351,6 @@ class MigrationService
             }
         }
         
-        // 4. Merge other storage data
         if (is_dir($extractDir . '/storage')) {
             $this->log(" -> Merging other storage directories...");
             $this->recursiveCopy($extractDir . '/storage', $rootPath . '/storage');
@@ -342,7 +375,6 @@ class MigrationService
             }
         }
 
-        // Also check assets_old
         $assetPaths = [public_path('assets_old'), base_path('assets_old')];
         foreach ($assetPaths as $p) {
             if (is_dir($p)) {

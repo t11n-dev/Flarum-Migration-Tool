@@ -26,28 +26,56 @@ export default class MigrationPage extends ExtensionPage {
 
     this.loadBackups();
     this.loadStatus();
+    this.progress = null;
+    this.pollingInterval = null;
   }
 
-  loadStatus() {
-    this.loading = true;
+  onremove() {
+    this.stopPolling();
+  }
 
-    app
+  startPolling() {
+    if (this.pollingInterval) return;
+    this.pollingInterval = setInterval(() => {
+      this.loadStatus(true);
+    }, 2000);
+  }
+
+  stopPolling() {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
+    }
+  }
+
+  loadStatus(silent = false) {
+    if (!silent) this.loading = true;
+
+    return app
       .request({
         method: 'GET',
         url: app.forum.attribute('apiUrl') + '/migration/status',
       })
       .then((response) => {
-        if (response.success && response.current_config) {
-          const config = response.current_config;
-          this.newUrl = this.newUrl || config.url;
-          this.dbHost = this.dbHost === 'localhost' ? config.db_host : this.dbHost;
-          this.dbName = this.dbName || config.db_name;
-          this.dbUser = this.dbUser || config.db_user;
-          this.dbPass = this.dbPass || config.db_pass;
+        if (response.success) {
+          if (response.current_config) {
+            const config = response.current_config;
+            this.newUrl = this.newUrl || config.url;
+            this.dbHost = this.dbHost === 'localhost' ? config.db_host : this.dbHost;
+            this.dbName = this.dbName || config.db_name;
+            this.dbUser = this.dbUser || config.db_user;
+            this.dbPass = this.dbPass || config.db_pass;
+          }
+          if (response.progress) {
+            this.progress = response.progress;
+            if (this.progress.status === 'complete' || this.progress.status === 'error' || this.progress.status === 'idle') {
+              // Optionally stop polling if complete, but we might want to keep it until UI reacts
+            }
+          }
         }
       })
       .finally(() => {
-        this.loading = false;
+        if (!silent) this.loading = false;
         m.redraw();
       });
   }
@@ -82,11 +110,44 @@ export default class MigrationPage extends ExtensionPage {
 
           {/* Tab Content */}
           <div className="MigrationContent">
+            {this.renderProgressBar()}
             {this.activeTab === 'backup' && this.backupTab()}
             {this.activeTab === 'migrate' && this.migrateTab()}
             {this.activeTab === 'logs' && this.logsTab()}
           </div>
         </div>
+      </div>
+    );
+  }
+
+  renderProgressBar() {
+    if (!this.progress || this.progress.status === 'idle' || this.progress.status === '') return null;
+
+    const progress = this.progress;
+    const isComplete = progress.status === 'complete';
+    const isError = progress.status === 'error';
+
+    return (
+      <div className="MigrationProgress" style="margin: 20px 0; padding: 15px; background: #f8f8f8; border-radius: 5px; border-left: 4px solid #4d698e;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-weight: bold;">
+          <span>{progress.label}</span>
+          <span>{progress.percent}%</span>
+        </div>
+        <div className="Progress-bar" style="background: #eee; height: 12px; border-radius: 6px; overflow: hidden;">
+          <div
+            style={{
+              width: progress.percent + '%',
+              height: '100%',
+              background: isError ? '#d83e3e' : (isComplete ? '#469b4e' : '#4d698e'),
+              transition: 'width 0.4s ease'
+            }}
+          ></div>
+        </div>
+        {isComplete && (
+          <div style="margin-top: 10px; text-align: right;">
+            <Button className="Button Button--link" onclick={() => { this.progress = null; m.redraw(); }}>✕ Dismiss</Button>
+          </div>
+        )}
       </div>
     );
   }
@@ -319,6 +380,7 @@ export default class MigrationPage extends ExtensionPage {
     }
 
     this.loading = true;
+    this.startPolling();
 
     app
       .request({
@@ -332,6 +394,8 @@ export default class MigrationPage extends ExtensionPage {
       })
       .finally(() => {
         this.loading = false;
+        this.stopPolling();
+        this.loadStatus(true);
         m.redraw();
       });
   }
@@ -375,6 +439,7 @@ export default class MigrationPage extends ExtensionPage {
 
   createBackup() {
     this.loading = true;
+    this.startPolling();
 
     app
       .request({
@@ -399,6 +464,8 @@ export default class MigrationPage extends ExtensionPage {
       })
       .finally(() => {
         this.loading = false;
+        this.stopPolling();
+        this.loadStatus(true); // Final status check
         m.redraw();
       });
   }
@@ -484,6 +551,7 @@ export default class MigrationPage extends ExtensionPage {
     }
 
     this.loading = true;
+    this.startPolling();
 
     app
       .request({
@@ -511,6 +579,8 @@ export default class MigrationPage extends ExtensionPage {
       })
       .finally(() => {
         this.loading = false;
+        this.stopPolling();
+        this.loadStatus(true);
         m.redraw();
       });
   }
