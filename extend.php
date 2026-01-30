@@ -16,8 +16,8 @@ return [
         // Backup routes
         ->post('/migration/backup/create', 'migration.backup.create', Api\Controller\CreateBackupController::class)
         ->get('/migration/backup/list', 'migration.backup.list', Api\Controller\ListBackupsController::class)
-        ->get('/migration/backup/download/{filename}', 'migration.backup.download', Api\Controller\DownloadBackupController::class)
-        ->delete('/migration/backup/delete/{filename}', 'migration.backup.delete', Api\Controller\DeleteBackupController::class)
+        ->get('/migration/backup/download', 'migration.backup.download', Api\Controller\DownloadBackupController::class)
+        ->delete('/migration/backup/delete', 'migration.backup.delete', Api\Controller\DeleteBackupController::class)
         
         // Migration routes
         ->post('/migration/upload', 'migration.upload', Api\Controller\UploadBackupController::class)

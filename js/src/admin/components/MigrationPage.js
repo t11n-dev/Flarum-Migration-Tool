@@ -423,7 +423,7 @@ export default class MigrationPage extends ExtensionPage {
   }
 
   downloadBackup(filename) {
-    window.location.href = app.forum.attribute('apiUrl') + '/migration/backup/download/' + filename;
+    window.open(app.forum.attribute('apiUrl') + '/migration/backup/download?filename=' + encodeURIComponent(filename), '_blank');
   }
 
   deleteBackup(filename) {
@@ -434,7 +434,7 @@ export default class MigrationPage extends ExtensionPage {
     app
       .request({
         method: 'DELETE',
-        url: app.forum.attribute('apiUrl') + '/migration/backup/delete/' + filename,
+        url: app.forum.attribute('apiUrl') + '/migration/backup/delete?filename=' + encodeURIComponent(filename),
       })
       .then((response) => {
         if (response.success) {

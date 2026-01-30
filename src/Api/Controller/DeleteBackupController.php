@@ -24,7 +24,7 @@ class DeleteBackupController implements RequestHandlerInterface
             $actor = RequestUtil::getActor($request);
             $actor->assertAdmin();
 
-            $filenameAttr = $request->getAttribute('filename');
+            $filenameAttr = \Illuminate\Support\Arr::get($request->getQueryParams(), 'filename');
             
             if (empty($filenameAttr)) {
                 return new JsonResponse(['success' => false, 'error' => 'Filename parameter is missing'], 400);
