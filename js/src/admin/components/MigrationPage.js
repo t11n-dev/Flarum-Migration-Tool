@@ -299,10 +299,41 @@ export default class MigrationPage extends ExtensionPage {
             >
               {app.translator.trans('migration-tool.admin.migrate.start_button')}
             </Button>
+            {' '}
+            <Button
+              className="Button Button--danger"
+              onclick={() => this.cleanupOldFiles()}
+              loading={this.loading}
+            >
+              {app.translator.trans('migration-tool.admin.migrate.cleanup_button')}
+            </Button>
           </div>
         </div>
       </div>
     );
+  }
+
+  cleanupOldFiles() {
+    if (!confirm(app.translator.trans('migration-tool.admin.migrate.cleanup_confirm'))) {
+      return;
+    }
+
+    this.loading = true;
+
+    app
+      .request({
+        method: 'POST',
+        url: app.forum.attribute('apiUrl') + '/migration/cleanup',
+      })
+      .then((response) => {
+        if (response.success) {
+          app.alerts.show(Alert, { type: 'success' }, app.translator.trans('migration-tool.admin.migrate.cleanup_success'));
+        }
+      })
+      .finally(() => {
+        this.loading = false;
+        m.redraw();
+      });
   }
 
   logsTab() {

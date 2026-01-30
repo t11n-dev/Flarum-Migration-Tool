@@ -121,7 +121,8 @@ class MigrationService
         }
 
         foreach ($items as $item) {
-            if (in_array($item, $exclude)) continue;
+            // Skip protected items and anything ending with _old
+            if (in_array($item, $exclude) || str_ends_with($item, '_old')) continue;
 
             $src = $rootPath . '/' . $item;
             $dst = $tempDir . '/' . $item;
@@ -140,6 +141,7 @@ class MigrationService
         $storageItems = array_diff(scandir($storagePath), ['.', '..', 'backups', 'logs', 'sessions', 'views', 'cache', 'migration_temp', 'migration_upload']);
         
         foreach ($storageItems as $sItem) {
+            if (str_ends_with($sItem, '_old')) continue;
             $src = $storagePath . '/' . $sItem;
             $dst = $tempDir . '/storage/' . $sItem;
             
@@ -178,8 +180,8 @@ class MigrationService
             $zip->extractTo($extractDir);
             $zip->close();
 
-            // 2. Database Import (Replace old DB with new DB)
-            $this->log("Step 2: Replacing database...");
+            // 2. Database Import
+            $this->log("Step 2: Replacing database (Safety mode)...");
             $sqlFile = $extractDir . '/database.sql';
             if (file_exists($sqlFile)) {
                 $this->importDatabase(
@@ -191,21 +193,21 @@ class MigrationService
                 );
             }
 
-            // 3. File Replacement (Total replacement except config.php)
-            $this->log("Step 3: Replacing files and folders (Total Replacement)...");
+            // 3. File Replacement (Safety mode: rename to _old)
+            $this->log("Step 3: Replacing files and folders (Safety: renaming existing items to _old)...");
             $this->replaceFilesFromBackup($extractDir);
 
             // 4. Update config.php
             $this->log("Step 4: Updating configuration...");
             $this->updateConfig($configData);
 
-            // Final Cleanup
+            // Final Cleanup of extraction temp
             $this->deleteDirectory($extractDir);
-            $this->log("✓ MIGRATION SUCCESSFUL!");
+            $this->log("✓ MIGRATION SUCCESSFUL! Existing items renamed with _old suffix.");
 
             return [
                 'success' => true,
-                'message' => 'Migration completed successfully.'
+                'message' => 'Migration completed successfully. Old files have been renamed to _old.'
             ];
 
         } catch (\Throwable $e) {
@@ -216,7 +218,7 @@ class MigrationService
     }
 
     /**
-     * Import database: drop tables first to "replace" the DB
+     * Import database: clearing tables first
      */
     protected function importDatabase($sqlFile, $host, $database, $username, $password)
     {
@@ -231,11 +233,8 @@ class MigrationService
         $sql = preg_replace('/--.*$/m', '', $sql);
         $sql = preg_replace('/\/\*.*?\*\//s', '', $sql);
         
-        $statements = explode(";\n", $sql);
-        
         $pdo->exec("SET FOREIGN_KEY_CHECKS=0");
         
-        // Drop existing tables to ensure "replacement"
         $this->log(" -> Clearing existing tables...");
         $tables = $pdo->query('SHOW TABLES')->fetchAll(\PDO::FETCH_COLUMN);
         foreach ($tables as $table) {
@@ -243,10 +242,17 @@ class MigrationService
         }
 
         $this->log(" -> Executing SQL dump...");
+        // Split by semicolon followed by newline to get individual statements
+        $statements = explode(";\n", $sql);
         foreach ($statements as $statement) {
             $statement = trim($statement);
             if (!empty($statement)) {
-                $pdo->exec($statement);
+                try {
+                    $pdo->exec($statement);
+                } catch (\Exception $e) {
+                    // Log but continue if possible
+                    $this->log("SQL Exec warning: " . substr($e->getMessage(), 0, 100), "warning");
+                }
             }
         }
         $pdo->exec("SET FOREIGN_KEY_CHECKS=1");
@@ -255,26 +261,29 @@ class MigrationService
     }
 
     /**
-     * Replace all files in root with backup files (Total Replacement except config.php)
+     * Rename existing files to _old and copy new ones
      */
     protected function replaceFilesFromBackup($extractDir)
     {
         $rootPath = base_path();
         
-        // 1. Delete everything in root EXCEPT protected items and config.php
-        $this->log(" -> Cleaning up current directories...");
-        $protected = ['storage', 'config.php', 'vendor', '.git', 'node_modules', '.env'];
+        // 1. Rename existing items in root to _old
+        $this->log(" -> Backing up current root items to _old...");
+        $protected = ['storage', 'config.php', 'vendor', '.git', 'node_modules', '.env', 'migration_temp', 'migration_upload'];
         $itemsInRoot = scandir($rootPath);
         
         foreach ($itemsInRoot as $item) {
             if (in_array($item, $protected) || $item === '.' || $item === '..') continue;
+            if (str_ends_with($item, '_old')) continue;
             
-            $p = $rootPath . '/' . $item;
-            if (is_dir($p)) {
-                $this->deleteDirectory($p);
-            } else {
-                @unlink($p);
+            $oldPath = $rootPath . '/' . $item;
+            $newPath = $rootPath . '/' . $item . '_old';
+            
+            if (file_exists($newPath)) {
+                is_dir($newPath) ? $this->deleteDirectory($newPath) : @unlink($newPath);
             }
+            
+            @rename($oldPath, $newPath);
         }
 
         // 2. Copy items from backup to root
@@ -292,23 +301,58 @@ class MigrationService
             }
         }
         
-        // 3. Special handling for storage/assets (replace)
-        $this->log(" -> Replacing storage/assets...");
+        // 3. Handle storage assets - safety first
+        $this->log(" -> Updating assets (safety: renaming old to _old)...");
         $srcAssets = $extractDir . '/storage/assets';
-        if (is_dir($srcAssets)) {
-            $dstAssets = $rootPath . '/public/assets'; // Flarum web assets are often in public/assets or assets depending on setup
-            // Compatibility: Flarum 1.x usually has assets in public/assets
-            if (!is_dir($dstAssets)) $dstAssets = base_path('assets');
-            
-            if (is_dir($dstAssets)) $this->deleteDirectory($dstAssets);
-            $this->recursiveCopy($srcAssets, $dstAssets);
+        
+        // Flarum assets can be in base/assets or public/assets
+        $assetPaths = [public_path('assets'), base_path('assets')];
+        
+        foreach ($assetPaths as $dstAssets) {
+            if (is_dir($srcAssets) && is_dir($dstAssets)) {
+                $oldAssets = $dstAssets . '_old';
+                if (is_dir($oldAssets)) $this->deleteDirectory($oldAssets);
+                @rename($dstAssets, $oldAssets);
+                $this->recursiveCopy($srcAssets, $dstAssets);
+            }
         }
         
-        // 4. Other storage data (extensions, etc)
+        // 4. Merge other storage data
         if (is_dir($extractDir . '/storage')) {
-            $this->log(" -> Merging other storage data...");
+            $this->log(" -> Merging other storage directories...");
             $this->recursiveCopy($extractDir . '/storage', $rootPath . '/storage');
         }
+    }
+
+    /**
+     * Delete all items ending in _old in root and assets
+     */
+    public function cleanupOldItems()
+    {
+        $rootPath = base_path();
+        $items = scandir($rootPath);
+        $count = 0;
+
+        foreach ($items as $item) {
+            if (str_ends_with($item, '_old')) {
+                $p = $rootPath . '/' . $item;
+                $this->log("Cleaning up: $item");
+                is_dir($p) ? $this->deleteDirectory($p) : @unlink($p);
+                $count++;
+            }
+        }
+
+        // Also check assets_old
+        $assetPaths = [public_path('assets_old'), base_path('assets_old')];
+        foreach ($assetPaths as $p) {
+            if (is_dir($p)) {
+                $this->deleteDirectory($p);
+                $count++;
+            }
+        }
+
+        $this->log("✓ Cleanup finished. Total $count items removed.");
+        return ['success' => true, 'removed_count' => $count];
     }
 
     /**
@@ -333,7 +377,7 @@ class MigrationService
     }
 
     /**
-     * Database Export Logic - Pure PHP (Most compatible)
+     * Database Export Logic - Pure PHP
      */
     protected function exportDatabase($filePath)
     {

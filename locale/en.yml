@@ -43,8 +43,11 @@ migration-tool:
       db_pass: Database Password
       
       start_button: Start Migration
-      confirm: This will overwrite all existing data. Are you absolutely sure?
-      success: Migration completed successfully! Please check the logs for details.
+      confirm: This will replace all existing files and database tables. Existing files will be renamed with an '_old' suffix for safety. Are you absolutely sure?
+      success: Migration completed successfully! Old files have been renamed with an '_old' suffix. Please check the logs and verify your site.
+      cleanup_button: Cleanup Old Files (_old)
+      cleanup_confirm: This will permanently delete all files and folders ending in '_old'. Are you sure?
+      cleanup_success: Old files cleaned up successfully.
     
     logs:
       refresh: Refresh Logs
