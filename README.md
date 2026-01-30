@@ -1,156 +1,70 @@
-# Flarum Migration Tool - Complete Admin UI
+# Flarum Migration Tool 🚀
 
-A powerful Flarum extension that provides a full Admin UI for backing up, restoring, and migrating your forum to a new server with ease.
+A professional, safety-first migration and backup extension for Flarum. Transfer your forum between servers or create full-system backups with ease, all through a beautiful real-time Admin UI.
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue)
-![Flarum](https://img.shields.io/badge/flarum-%5E1.0-orange)
-![License](https://img.shields.io/badge/license-MIT-green)
+![Version](https://img.shields.io/badge/version-2.4.0-blue.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+![Flarum](https://img.shields.io/badge/flarum-core%20v1.0+-orange.svg)
 
 ## ✨ Key Features
 
-### 🛡️ Backup (Server A)
-- **One-click Full Backup**: Generates a complete ZIP archive directly from the Admin Panel.
-- **Smart Database Dump**: Uses system `mysqldump` for speed and reliability (no more PHP memory limit issues).
-- **Flexible Options**: Choose to include/exclude uploads or vendor files.
-- **Components Included**:
-  - Database (`.sql` via mysqldump)
-  - Settings (`.json`)
-  - Config (`config.php`)
-  - Composer dependencies (`composer.json`, `composer.lock`)
-  - Assets (Avatars, uploads)
-  - Extension Data
-  - **Auto-Restore Script** (`migrate.sh`)
+*   **1-Click Full Backup**: Zip your entire Flarum site, including database, settings, and files.
+*   **Safety-First Migration**: Existing server files are renamed with an `_old` suffix during migration. Data is never lost until you verify and click "Cleanup".
+*   **Real-time Progress Bar**: Track every step of your backup or migration with detailed status labels and percentage updates.
+*   **Smart Pre-filling**: Automatically detects your current server's URL and database credentials to save time during migrations.
+*   **Flexible Options**:
+    *   Include/Exclude `vendor` directory.
+    *   Include/Exclude user uploads (avatars, attachments).
+    *   Include/Exclude `config.php` (sensitive credentials) in backups.
+*   **Robust DB Engine**: Pure PHP database export/import engine designed for maximum compatibility across different hosting environments.
+*   **Post-Migration Cleanup**: Dedicated tool to permanently remove old files once you've confirmed your new site is working perfectly.
+*   **Command Line Support**: Advanced users can still perform migrations via `php flarum migration:migrate`.
 
-### 🚀 Migrate & Restore (Server B)
-- **Intelligent Restoration**:
-  - **Smart Config Patching**: Updates `config.php` database/url values while **preserving** your existing mail, queue, and driver settings.
-  - **Permission Aware**: Automatically creates correct permissions (detects if running as Root vs Shared Host).
-- **Two Ways to Restore**:
-  1. **via Admin UI**: Upload the ZIP and let the extension handle everything.
-  2. **via Terminal (Recommended)**: Use the generated `migrate.sh` script for a robust restoration on fresh servers.
+## 🛠 Installation
 
-## 📦 Installation
-
-### 1. Install Extension
+Install the extension via Composer:
 
 ```bash
 composer require nauhyuh/flarum-migration-tool
 ```
 
-### 2. Enable Extension
+After installation, enable the extension in your Flarum Admin dashboard.
 
-```bash
-php flarum extension:enable nauhyuh-migration-tool
-```
+## 🚀 How to Migrate
 
-## � Updating
+### Step 1: Create a Backup on Source Server
+1. Go to **Admin > Migration Tool > Backup** tab.
+2. Select your desired options (Exclude `vendor` for smaller files).
+3. Click **Create Backup**. Watch the real-time progress bar.
+4. Once finished, click **Download** to save the ZIP to your computer.
 
-```bash
-composer update nauhyuh/flarum-migration-tool
-php flarum migrate
-php flarum cache:clear
-```
+### Step 2: Restore on Destination Server
+1. Install this extension on your new Flarum site.
+2. Go to **Admin > Migration Tool > Migrate** tab.
+3. Upload your ZIP backup file.
+4. The tool will auto-fill your current server's DB details. Update if you are migrating to a different database.
+5. Click **Start Migration**. The tool will:
+    *   Backup existing files to `*_old`.
+    *   Replace the database.
+    *   Restore your files.
+6. Check your site. If everything is perfect, click **Cleanup Old Files** to delete the `_old` items.
 
-## 🗑️ Uninstalling
+## 📋 Requirements
 
-To disable the extension:
-```bash
-php flarum extension:disable nauhyuh-migration-tool
-```
+*   Flarum v1.0+
+*   PHP `zip` extension enabled.
+*   Write permissions for `storage` and root directories.
+*   MySQL/MariaDB database.
 
-To permanently remove:
-```bash
-composer remove nauhyuh/flarum-migration-tool
-php flarum cache:clear
-```
+## 🛡 Security & Safety
 
-## �📖 Usage Guide
-
-### A. On the Old Server (Backup)
-
-1.  Log in to the **Admin Panel**.
-2.  Navigate to **Migration Tool**.
-3.  Go to the **Backup** tab.
-4.  Select options:
-    *   ✅ **Include uploaded files** (Recommended)
-    *   ⬜ **Include vendor** (Not recommended - makes the file huge; `composer install` is faster).
-5.  Click **Create Backup**.
-6.  Once finished, click **Download** to save the ZIP file.
-
-### B. On the New Server (Restore)
-
-#### Method 1: Using the Auto-Script (Best for VPS/Terminal)
-
-Every backup ZIP comes with a smart `migrate.sh` script.
-
-1.  Upload the ZIP file to your new server folder.
-2.  Unzip it:
-    ```bash
-    unzip flarum_backup_202X-XX-XX.zip -d restore_temp
-    ```
-3.  Run the script:
-    ```bash
-    cd restore_temp
-    chmod +x migrate.sh
-    ./migrate.sh
-    ```
-4.  Follow the prompts. The script will:
-    *   Import the database.
-    *   Restore files.
-    *   Patch `config.php` safely.
-    *   Run `composer install`.
-    *   Fix permissions automatically.
-
-#### Method 2: Using Admin UI (If you already have a fresh Flarum)
-
-1.  Install a fresh Flarum instance on the new server.
-2.  Install this extension (`composer require nauhyuh/flarum-migration-tool`).
-3.  Enable it and go to **Admin Panel** > **Migration Tool**.
-4.  Switch to the **Migrate** tab.
-5.  Upload your Backup ZIP.
-6.  Fill in the new **Database Credentials** and **Site URL**.
-7.  Click **Start Migration**.
-
-## 🛠️ Metadata & Structure
-
-The backup ZIP follows this structure:
-
-```text
-backup.zip
-├── database.sql        # High-performance MySQL dump
-├── settings.json       # Flarum settings table export
-├── config.php          # Original config
-├── composer.json       # Dependency map
-├── metadata.json       # Server & Environment info
-├── migrate.sh          # <---The magic restore script
-├── assets/             # Public assets
-└── storage/            # Internal storage files
-```
-
-## ⚠️ Security & Safety
-
-*   **Sensitive Data**: Backups contain your **entire database** and **config secrets**. Store them securely.
-*   **HTTPS**: Always use HTTPS when uploading/downloading backups via the Admin UI.
-*   **Permissions**: The tool tries to be smart, but always ensure your `storage` folder is writable (`775`).
-
-## ❓ Troubleshooting
-
-**"mysqldump not found"**
-The extension requires `mysqldump` to be installed on the server for high-performance backups. If you are on shared hosting without it, please contact your host or use the legacy PHP-based backup (available in older versions).
-
-**"Permission denied"**
-If `migrate.sh` fails with permission errors, try running it with `sudo` or check if the folder allows execution.
-
-**"Upload failed" (File too large)**
-Adjust your PHP settings:
-```ini
-upload_max_filesize = 512M
-post_max_size = 512M
-```
+*   **No Data Deletion**: Migrations use high-level safety renaming. Your old files are kept safe as `_old` until you choose to delete them.
+*   **Cleanup Tool**: Ensures no sensitive `_old` files (like `config.php_old`) are left on your server publicly.
+*   **Admin Only**: All migration routes are strictly protected by Flarum's admin authorization.
 
 ## 📄 License
 
-MIT License.
+This project is licensed under the MIT License.
 
 ---
-Made with ❤️ for the Flarum community.
+**Crafted with ❤️ by Nauhyuh**
