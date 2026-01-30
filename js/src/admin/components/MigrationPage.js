@@ -145,11 +145,20 @@ export default class MigrationPage extends ExtensionPage {
         </div>
         {isComplete && (
           <div style="margin-top: 10px; text-align: right;">
-            <Button className="Button Button--link" onclick={() => { this.progress = null; m.redraw(); }}>✕ Dismiss</Button>
+            <Button className="Button Button--link" onclick={() => this.resetProgress()}>✕ Dismiss</Button>
           </div>
         )}
       </div>
     );
+  }
+
+  resetProgress() {
+    this.progress = null;
+    app.request({
+      method: 'POST',
+      url: app.forum.attribute('apiUrl') + '/migration/progress/reset',
+    });
+    m.redraw();
   }
 
   backupTab() {
@@ -427,6 +436,10 @@ export default class MigrationPage extends ExtensionPage {
   }
 
   switchTab(tab) {
+    if (this.progress && this.progress.status === 'complete') {
+      this.resetProgress();
+    }
+
     this.activeTab = tab;
     if (tab === 'backup') {
       this.loadBackups();

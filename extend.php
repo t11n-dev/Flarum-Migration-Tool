@@ -25,7 +25,8 @@ return [
         ->get('/migration/status', 'migration.status', Api\Controller\MigrationStatusController::class)
         ->get('/migration/logs', 'migration.logs', Api\Controller\GetLogsController::class)
         ->post('/migration/config/update', 'migration.config.update', Api\Controller\UpdateConfigController::class)
-        ->post('/migration/cleanup', 'migration.cleanup', Api\Controller\CleanupOldFilesController::class),
+        ->post('/migration/cleanup', 'migration.cleanup', Api\Controller\CleanupOldFilesController::class)
+        ->post('/migration/progress/reset', 'migration.progress.reset', Api\Controller\ResetProgressController::class),
     
     // Frontend
     (new Extend\Frontend('admin'))
