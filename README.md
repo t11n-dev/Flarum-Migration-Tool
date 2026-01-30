@@ -43,7 +43,28 @@ composer require nauhyuh/flarum-migration-tool
 php flarum extension:enable nauhyuh-migration-tool
 ```
 
-## 📖 Usage Guide
+## � Updating
+
+```bash
+composer update nauhyuh/flarum-migration-tool
+php flarum migrate
+php flarum cache:clear
+```
+
+## 🗑️ Uninstalling
+
+To disable the extension:
+```bash
+php flarum extension:disable nauhyuh-migration-tool
+```
+
+To permanently remove:
+```bash
+composer remove nauhyuh/flarum-migration-tool
+php flarum cache:clear
+```
+
+## �📖 Usage Guide
 
 ### A. On the Old Server (Backup)
 
