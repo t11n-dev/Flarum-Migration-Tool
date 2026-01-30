@@ -2,14 +2,15 @@
 
 namespace Nauhyuh\MigrationTool\Api\Controller;
 
-use Flarum\Api\Controller\AbstractShowController;
 use Flarum\Http\RequestUtil;
 use Illuminate\Support\Arr;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
-use Tobscure\JsonApi\Document;
+use Psr\Http\Server\RequestHandlerInterface;
+use Laminas\Diactoros\Response\JsonResponse;
 use Nauhyuh\MigrationTool\Service\MigrationService;
 
-class CreateBackupController extends AbstractShowController
+class CreateBackupController implements RequestHandlerInterface
 {
     protected $migrationService;
 
@@ -18,7 +19,7 @@ class CreateBackupController extends AbstractShowController
         $this->migrationService = $migrationService;
     }
 
-    protected function data(ServerRequestInterface $request, Document $document)
+    public function handle(ServerRequestInterface $request): ResponseInterface
     {
         $actor = RequestUtil::getActor($request);
         $actor->assertAdmin();
@@ -29,12 +30,12 @@ class CreateBackupController extends AbstractShowController
 
         try {
             $result = $this->migrationService->createBackup($includeUploads, $includeVendor);
-            return $result;
+            return new JsonResponse($result);
         } catch (\Exception $e) {
-            return [
+            return new JsonResponse([
                 'success' => false,
                 'error' => $e->getMessage()
-            ];
+            ], 500);
         }
     }
 }

@@ -2,13 +2,14 @@
 
 namespace Nauhyuh\MigrationTool\Api\Controller;
 
-use Flarum\Api\Controller\AbstractShowController;
 use Flarum\Http\RequestUtil;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
-use Tobscure\JsonApi\Document;
+use Psr\Http\Server\RequestHandlerInterface;
+use Laminas\Diactoros\Response\JsonResponse;
 use Nauhyuh\MigrationTool\Service\MigrationService;
 
-class MigrationStatusController extends AbstractShowController
+class MigrationStatusController implements RequestHandlerInterface
 {
     protected $migrationService;
 
@@ -17,7 +18,7 @@ class MigrationStatusController extends AbstractShowController
         $this->migrationService = $migrationService;
     }
 
-    protected function data(ServerRequestInterface $request, Document $document)
+    public function handle(ServerRequestInterface $request): ResponseInterface
     {
         $actor = RequestUtil::getActor($request);
         $actor->assertAdmin();
@@ -39,10 +40,10 @@ class MigrationStatusController extends AbstractShowController
             }
         }
 
-        return [
+        return new JsonResponse([
             'success' => true,
             'uploads' => $uploads,
             'backup_count' => count($this->migrationService->listBackups())
-        ];
+        ]);
     }
 }

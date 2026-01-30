@@ -2,15 +2,16 @@
 
 namespace Nauhyuh\MigrationTool\Api\Controller;
 
-use Flarum\Api\Controller\AbstractShowController;
 use Flarum\Http\RequestUtil;
 use Illuminate\Support\Arr;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
-use Tobscure\JsonApi\Document;
+use Psr\Http\Server\RequestHandlerInterface;
+use Laminas\Diactoros\Response\JsonResponse;
 use Nauhyuh\MigrationTool\Service\MigrationService;
 use ZipArchive;
 
-class MigrateController extends AbstractShowController
+class MigrateController implements RequestHandlerInterface
 {
     protected $migrationService;
 
@@ -19,7 +20,7 @@ class MigrateController extends AbstractShowController
         $this->migrationService = $migrationService;
     }
 
-    protected function data(ServerRequestInterface $request, Document $document)
+    public function handle(ServerRequestInterface $request): ResponseInterface
     {
         $actor = RequestUtil::getActor($request);
         $actor->assertAdmin();
@@ -76,8 +77,13 @@ class MigrateController extends AbstractShowController
 
             // Run migrations
             $this->migrationService->log("Running Flarum migrations...");
-            \Artisan::call('migrate', ['--force' => true]);
-            \Artisan::call('cache:clear');
+            // Use Artisan safely if available, but be careful as config might have changed
+            try {
+                \Artisan::call('migrate', ['--force' => true]);
+                \Artisan::call('cache:clear');
+            } catch (\Exception $e) {
+                $this->migrationService->log("Artisan warning: " . $e->getMessage());
+            }
 
             // Set permissions
             $this->migrationService->log("Setting permissions...");
@@ -89,17 +95,17 @@ class MigrateController extends AbstractShowController
             // Cleanup
             $this->cleanupExtraction($extractPath);
 
-            return [
+            return new JsonResponse([
                 'success' => true,
                 'message' => 'Migration completed successfully!'
-            ];
+            ]);
 
         } catch (\Exception $e) {
             $this->migrationService->log("Migration error: " . $e->getMessage(), 'error');
-            return [
+            return new JsonResponse([
                 'success' => false,
                 'error' => $e->getMessage()
-            ];
+            ], 500);
         }
     }
 

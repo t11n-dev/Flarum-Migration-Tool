@@ -2,15 +2,16 @@
 
 namespace Nauhyuh\MigrationTool\Api\Controller;
 
-use Flarum\Api\Controller\AbstractShowController;
 use Flarum\Http\RequestUtil;
 use Illuminate\Support\Arr;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
-use Tobscure\JsonApi\Document;
+use Psr\Http\Server\RequestHandlerInterface;
+use Laminas\Diactoros\Response\JsonResponse;
 
-class UpdateConfigController extends AbstractShowController
+class UpdateConfigController implements RequestHandlerInterface
 {
-    protected function data(ServerRequestInterface $request, Document $document)
+    public function handle(ServerRequestInterface $request): ResponseInterface
     {
         $actor = RequestUtil::getActor($request);
         $actor->assertAdmin();
@@ -53,16 +54,16 @@ class UpdateConfigController extends AbstractShowController
             $configContent = "<?php return " . var_export($config, true) . ";";
             file_put_contents($configPath, $configContent);
 
-            return [
+            return new JsonResponse([
                 'success' => true,
                 'message' => 'Configuration updated successfully'
-            ];
+            ]);
 
         } catch (\Exception $e) {
-            return [
+            return new JsonResponse([
                 'success' => false,
                 'error' => $e->getMessage()
-            ];
+            ], 500);
         }
     }
 }

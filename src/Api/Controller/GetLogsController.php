@@ -2,13 +2,14 @@
 
 namespace Nauhyuh\MigrationTool\Api\Controller;
 
-use Flarum\Api\Controller\AbstractShowController;
 use Flarum\Http\RequestUtil;
+use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
-use Tobscure\JsonApi\Document;
+use Psr\Http\Server\RequestHandlerInterface;
+use Laminas\Diactoros\Response\JsonResponse;
 use Nauhyuh\MigrationTool\Service\MigrationService;
 
-class GetLogsController extends AbstractShowController
+class GetLogsController implements RequestHandlerInterface
 {
     protected $migrationService;
 
@@ -17,16 +18,17 @@ class GetLogsController extends AbstractShowController
         $this->migrationService = $migrationService;
     }
 
-    protected function data(ServerRequestInterface $request, Document $document)
+    public function handle(ServerRequestInterface $request): ResponseInterface
     {
         $actor = RequestUtil::getActor($request);
         $actor->assertAdmin();
 
         $logs = $this->migrationService->getLogs(200);
 
-        return [
+        return new JsonResponse([
             'success' => true,
+            // Logs are array of strings, good for JSON
             'logs' => $logs
-        ];
+        ]);
     }
 }
