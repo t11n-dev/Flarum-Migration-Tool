@@ -225,7 +225,7 @@ class MigrationService
             'flarum_version' => \Flarum\Foundation\Application::VERSION,
             'php' => PHP_VERSION,
             'db_name' => $this->db->getDatabaseName(),
-            'url' => url('/'),
+            'url' => app('flarum.config')['url'],
             'include_uploads' => $includeUploads,
             'include_vendor' => $includeVendor,
         ];
