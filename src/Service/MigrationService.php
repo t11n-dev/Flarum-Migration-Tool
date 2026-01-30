@@ -222,7 +222,7 @@ class MigrationService
             'app' => 'Flarum',
             'package' => 'nauhyuh/flarum-migration-tool',
             'date' => date('Y-m-d H:i:s'),
-            'flarum_version' => app()->version(),
+            'flarum_version' => \Flarum\Foundation\Application::VERSION,
             'php' => PHP_VERSION,
             'db_name' => $this->db->getDatabaseName(),
             'url' => url('/'),
