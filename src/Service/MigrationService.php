@@ -10,23 +10,19 @@ use ZipArchive;
 
 class MigrationService
 {
-    protected $db;
     protected $settings;
     protected $files;
-    protected $config;
     protected $backupPath;
     protected $logPath;
 
     public function __construct(
         ConnectionInterface $db,
         SettingsRepositoryInterface $settings,
-        Filesystem $files,
-        Config $config
+        Filesystem $files
     ) {
         $this->db = $db;
         $this->settings = $settings;
         $this->files = $files;
-        $this->config = $config;
         $this->backupPath = storage_path('backups');
         $this->logPath = storage_path('logs/migration.log');
         
@@ -139,7 +135,8 @@ class MigrationService
      */
     protected function exportDatabase($filePath)
     {
-        $conf = $this->config['database'];
+        $config = resolve('flarum.config');
+        $conf = $config['database'];
         
         // Security: Create a temporary config file to store credentials
         // avoiding password exposure in process list (ps aux)
