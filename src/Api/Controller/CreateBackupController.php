@@ -14,21 +14,22 @@ class CreateBackupController implements RequestHandlerInterface
 {
     protected $migrationService;
 
-    public function __construct(MigrationService $migrationService)
+    public function __construct()
     {
-        $this->migrationService = $migrationService;
     }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
-        $actor = RequestUtil::getActor($request);
-        $actor->assertAdmin();
-
-        $body = $request->getParsedBody();
-        $includeUploads = Arr::get($body, 'include_uploads', true);
-        $includeVendor = Arr::get($body, 'include_vendor', false);
-
         try {
+            $this->migrationService = new MigrationService();
+
+            $actor = RequestUtil::getActor($request);
+            $actor->assertAdmin();
+
+            $body = $request->getParsedBody();
+            $includeUploads = Arr::get($body, 'include_uploads', true);
+            $includeVendor = Arr::get($body, 'include_vendor', false);
+
             $result = $this->migrationService->createBackup($includeUploads, $includeVendor);
             return new JsonResponse($result);
         } catch (\Throwable $e) {

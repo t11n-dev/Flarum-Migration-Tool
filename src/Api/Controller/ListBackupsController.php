@@ -13,14 +13,15 @@ class ListBackupsController implements RequestHandlerInterface
 {
     protected $migrationService;
 
-    public function __construct(MigrationService $migrationService)
+    public function __construct()
     {
-        $this->migrationService = $migrationService;
     }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
         try {
+            $this->migrationService = new MigrationService();
+
             $actor = RequestUtil::getActor($request);
             $actor->assertAdmin();
 

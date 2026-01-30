@@ -15,14 +15,11 @@ class MigrationService
     protected $backupPath;
     protected $logPath;
 
-    public function __construct(
-        ConnectionInterface $db,
-        SettingsRepositoryInterface $settings,
-        Filesystem $files
-    ) {
-        $this->db = $db;
-        $this->settings = $settings;
-        $this->files = $files;
+    public function __construct()
+    {
+        $this->db = app('db.connection');
+        $this->settings = app('flarum.settings');
+        $this->files = new Filesystem();
         $this->backupPath = storage_path('backups');
         $this->logPath = storage_path('logs/migration.log');
         
