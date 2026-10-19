@@ -2,7 +2,7 @@
 
 A professional, safety-first migration and backup extension for Flarum. Transfer your forum between servers or create full-system backups with ease, all through a beautiful real-time Admin UI.
 
-![Version](https://img.shields.io/badge/version-2.5.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.5.1-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Flarum](https://img.shields.io/badge/flarum-core%20v1.0+-orange.svg)
 

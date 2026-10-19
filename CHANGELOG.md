@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.5.0] - 2026-10-19
+## [2.5.1] - 2026-10-19
 
 ### Changed
 - The package moved to `t11n-dev/flarum-migration-tool` (repository: https://github.com/t11n-dev/Flarum-Migration-Tool). The extension ID is now `t11n-dev-migration-tool`; re-enable the extension after switching.

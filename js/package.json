@@ -1,6 +1,6 @@
 {
   "name": "@t11n-dev/flarum-migration-tool",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "Flarum migration tool with admin UI",
   "main": "src/admin/index.js",
   "scripts": {
