@@ -16,8 +16,7 @@
     "authors": [
         {
             "name": "T11N",
-            "email": "nauhyuh@gmail.com",
-            "homepage": "https://github.com/t11n-dev"
+            "homepage": "https://t11n.dev/"
         }
     ],
     "support": {
@@ -26,12 +25,6 @@
         "forum": "https://discuss.flarum.org/d/your-discussion-id"
     },
     "homepage": "https://github.com/t11n-dev/Flarum-Migration-Tool",
-    "funding": [
-        {
-            "type": "github",
-            "url": "https://github.com/sponsors/nauhyuh"
-        }
-    ],
     "require": {
         "php": ">=8.0",
         "ext-zip": "*",
