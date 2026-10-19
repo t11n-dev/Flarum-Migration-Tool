@@ -9,6 +9,8 @@ use Nauhyuh\MigrationTool\Service\MigrationService;
 
 class ImportCommand extends AbstractCommand
 {
+    use InteractsWithConsole;
+
     protected function configure()
     {
         $this
@@ -41,7 +43,7 @@ class ImportCommand extends AbstractCommand
             // For import command, we assume we want to keep current config but import DB and assets
             // We'll use service utilities for parts of it
             
-            $extractPath = storage_path('migration_import_' . time());
+            $extractPath = storage_path('migration_temp/import_' . time());
             mkdir($extractPath, 0755, true);
 
             $this->info('Extracting backup...');
@@ -63,10 +65,17 @@ class ImportCommand extends AbstractCommand
                 $dbConfig['password']
             );
 
-            // Copy assets
-            if (is_dir($extractPath . '/assets')) {
-                $this->info('Copying assets...');
-                $service->recursiveCopy($extractPath . '/assets', public_path('assets'));
+            // Copy assets (public/assets inside the backup, or storage/assets from older backups)
+            $publicRel = ltrim(substr(public_path(), strlen(base_path())), '/');
+            $assetSources = [
+                $extractPath . '/' . ($publicRel !== '' ? $publicRel . '/' : '') . 'assets',
+                $extractPath . '/storage/assets',
+            ];
+            foreach ($assetSources as $assetSource) {
+                if (is_dir($assetSource)) {
+                    $this->info('Copying assets...');
+                    $service->recursiveCopy($assetSource, public_path('assets'));
+                }
             }
 
             // Copy extensions storage
@@ -79,8 +88,8 @@ class ImportCommand extends AbstractCommand
 
             $this->info('✓ Import completed successfully!');
             $this->warn('Running migrations and clearing cache...');
-            $this->call('migrate');
-            $this->call('cache:clear');
+            $this->callCommand('migrate');
+            $this->callCommand('cache:clear');
 
         } catch (\Throwable $e) {
             $this->error('Import failed: ' . $e->getMessage());

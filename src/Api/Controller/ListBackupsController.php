@@ -21,9 +21,7 @@ class ListBackupsController implements RequestHandlerInterface
     {
         try {
             $this->migrationService = new MigrationService();
-
-            $this->migrationService = new MigrationService();
-        $actor = RequestUtil::getActor($request);
+            $actor = RequestUtil::getActor($request);
             $actor->assertAdmin();
 
             $backups = $this->migrationService->listBackups();
@@ -35,8 +33,7 @@ class ListBackupsController implements RequestHandlerInterface
         } catch (\Throwable $e) {
             return new JsonResponse([
                 'success' => false,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error' => $e->getMessage()
             ], 500);
         }
     }

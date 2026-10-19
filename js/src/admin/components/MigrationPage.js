@@ -64,7 +64,7 @@ export default class MigrationPage extends ExtensionPage {
             this.dbHost = this.dbHost === 'localhost' ? config.db_host : this.dbHost;
             this.dbName = this.dbName || config.db_name;
             this.dbUser = this.dbUser || config.db_user;
-            this.dbPass = this.dbPass || config.db_pass;
+            this.hasDbPass = config.has_db_pass;
           }
           if (response.progress) {
             this.progress = response.progress;
@@ -357,7 +357,11 @@ export default class MigrationPage extends ExtensionPage {
                 this.dbPass = e.target.value;
               }}
               placeholder="********"
+              autocomplete="new-password"
             />
+            {this.hasDbPass && (
+              <div className="helpText">{app.translator.trans('migration-tool.admin.migrate.db_pass_help')}</div>
+            )}
           </div>
 
           <div className="Form-group">

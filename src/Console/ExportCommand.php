@@ -8,14 +8,6 @@ use Nauhyuh\MigrationTool\Service\MigrationService;
 
 class ExportCommand extends AbstractCommand
 {
-    protected $migrationService;
-
-    public function __construct(MigrationService $migrationService)
-    {
-        parent::__construct();
-        $this->migrationService = $migrationService;
-    }
-
     protected function configure()
     {
         $this
@@ -33,7 +25,7 @@ class ExportCommand extends AbstractCommand
         $includeVendor = $this->input->getOption('include-vendor');
 
         try {
-            $result = $this->migrationService->createBackup($includeUploads, $includeVendor);
+            $result = (new MigrationService())->createBackup($includeUploads, $includeVendor);
 
             if ($result['success']) {
                 $this->info('✓ Backup created successfully!');
@@ -44,7 +36,7 @@ class ExportCommand extends AbstractCommand
                 $this->error('Backup failed!');
             }
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->error('Error: ' . $e->getMessage());
             return 1;
         }

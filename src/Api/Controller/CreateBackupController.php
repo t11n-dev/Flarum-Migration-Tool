@@ -35,8 +35,7 @@ class CreateBackupController implements RequestHandlerInterface
         } catch (\Throwable $e) {
             return new JsonResponse([
                 'success' => false,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error' => $e->getMessage()
             ], 500);
         }
     }

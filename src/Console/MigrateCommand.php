@@ -8,6 +8,8 @@ use Nauhyuh\MigrationTool\Service\MigrationService;
 
 class MigrateCommand extends AbstractCommand
 {
+    use InteractsWithConsole;
+
     protected function configure()
     {
         $this

@@ -22,22 +22,30 @@ class MigrateController implements RequestHandlerInterface
     {
         try {
             $this->migrationService = new MigrationService();
-
-            $this->migrationService = new MigrationService();
-        $actor = RequestUtil::getActor($request);
+            $actor = RequestUtil::getActor($request);
             $actor->assertAdmin();
 
             $body = $request->getParsedBody();
-            $filename = Arr::get($body, 'filename');
-            
+            $filename = basename((string) Arr::get($body, 'filename', ''));
+
+            if ($filename === '' || $filename === '.' || pathinfo($filename, PATHINFO_EXTENSION) !== 'zip') {
+                return new JsonResponse(['success' => false, 'error' => 'Invalid filename'], 400);
+            }
+
             $zipPath = storage_path('migration_upload/' . $filename);
-            
+
+            // An empty password field means "keep the current password"
+            $dbPass = Arr::get($body, 'db_pass');
+            if ($dbPass === null || $dbPass === '') {
+                $dbPass = $this->migrationService->getCurrentDbPassword();
+            }
+
             $configData = [
                 'new_url' => Arr::get($body, 'new_url'),
                 'db_host' => Arr::get($body, 'db_host', 'localhost'),
                 'db_name' => Arr::get($body, 'db_name'),
                 'db_user' => Arr::get($body, 'db_user'),
-                'db_pass' => Arr::get($body, 'db_pass'),
+                'db_pass' => $dbPass,
             ];
 
             $result = $this->migrationService->performMigration($zipPath, $configData);
@@ -47,8 +55,7 @@ class MigrateController implements RequestHandlerInterface
         } catch (\Throwable $e) {
             return new JsonResponse([
                 'success' => false,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error' => $e->getMessage()
             ], 500);
         }
     }

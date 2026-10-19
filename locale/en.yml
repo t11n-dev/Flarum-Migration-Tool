@@ -9,7 +9,7 @@ migration-tool:
     
     backup:
       settings: Backup Settings
-      include_uploads: Include uploaded files (avatars, attachments)
+      include_uploads: Include uploaded files (avatars, attachments in assets/files)
       include_vendor: Include vendor directory (not recommended - use composer install instead)
       include_config: Include config.php (contains database credentials)
       help: Create a complete backup of your Flarum forum. The backup will include database, settings, and optionally uploaded files or config.php.
@@ -41,6 +41,7 @@ migration-tool:
       db_name: Database Name
       db_user: Database Username
       db_pass: Database Password
+      db_pass_help: Leave empty to keep the current database password.
       
       start_button: Start Migration
       confirm: This will replace all existing files and database tables. Existing files will be renamed with an '_old' suffix for safety. Are you absolutely sure?

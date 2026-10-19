@@ -47,8 +47,7 @@ class DownloadBackupController implements RequestHandlerInterface
                 ->withHeader('Content-Transfer-Encoding', 'binary');
         } catch (\Throwable $e) {
             return new JsonResponse([
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'error' => $e->getMessage()
             ], 500);
         }
     }

@@ -2,35 +2,64 @@
 
 namespace Nauhyuh\MigrationTool\Service;
 
-use Illuminate\Database\ConnectionInterface;
-use Flarum\Settings\SettingsRepositoryInterface;
-use Illuminate\Filesystem\Filesystem;
 use ZipArchive;
 
 class MigrationService
 {
+    /**
+     * Files inside the backup root that are metadata, never copied into the site.
+     */
+    const BACKUP_META_ITEMS = ['database.sql', 'settings.json', 'metadata.json', 'migrate.sh'];
+
+    /**
+     * Root items that are never renamed to _old during a restore.
+     */
+    const PROTECTED_ITEMS = ['storage', 'config.php', 'vendor', '.git', 'node_modules', '.env', 'migration_temp', 'migration_upload'];
+
     protected $db;
-    protected $settings;
-    protected $files;
     protected $backupPath;
     protected $logPath;
     protected $progressPath;
+    protected $lockPath;
+    protected $lockHandle;
 
     public function __construct()
     {
         $this->db = app('db.connection');
-        $this->settings = app('flarum.settings');
-        $this->files = new Filesystem();
         $this->backupPath = storage_path('backups');
         $this->logPath = storage_path('logs/migration.log');
         $this->progressPath = storage_path('logs/migration_progress.json');
-        
+        $this->lockPath = storage_path('logs/migration.lock');
+
         if (!is_dir($this->backupPath)) {
             @mkdir($this->backupPath, 0755, true);
         }
+    }
 
+    protected function assertZipAvailable()
+    {
         if (!class_exists('ZipArchive')) {
             throw new \Exception("PHP 'zip' extension is not installed. ZIP functionality is required for backups.");
+        }
+    }
+
+    /**
+     * Prevent a backup and a migration (or two of either) from running at the same time.
+     */
+    protected function acquireLock()
+    {
+        $this->lockHandle = fopen($this->lockPath, 'c');
+        if (!$this->lockHandle || !flock($this->lockHandle, LOCK_EX | LOCK_NB)) {
+            throw new \Exception('Another backup or migration is already running. Please wait for it to finish.');
+        }
+    }
+
+    protected function releaseLock()
+    {
+        if ($this->lockHandle) {
+            flock($this->lockHandle, LOCK_UN);
+            fclose($this->lockHandle);
+            $this->lockHandle = null;
         }
     }
 
@@ -67,13 +96,16 @@ class MigrationService
         @set_time_limit(0);
         @ini_set('memory_limit', '1024M');
 
+        $this->assertZipAvailable();
+        $this->acquireLock();
+
         $this->updateProgress('running', 5, 'Initializing backup...');
         $this->log('Starting backup creation process...');
-        
+
         $timestamp = date('Y-m-d_H-i-s');
         $backupName = "flarum_backup_{$timestamp}";
         $tempDir = storage_path('migration_temp/' . $backupName);
-        
+
         try {
             if (!is_dir($tempDir)) {
                 mkdir($tempDir, 0755, true);
@@ -83,16 +115,16 @@ class MigrationService
             $this->updateProgress('running', 10, 'Exporting database...');
             $this->log('Step 1: Exporting database...');
             $this->exportDatabase($tempDir . '/database.sql');
-            
+
             // 2. Export settings
             $this->updateProgress('running', 25, 'Exporting settings...');
             $this->log('Step 2: Exporting settings...');
             $this->exportSettings($tempDir . '/settings.json');
-            
+
             // 3. Copy application files
             $this->updateProgress('running', 40, 'Copying application files (this may take a while)...');
             $this->log('Step 3: Copying application files...');
-            $this->copySourceFiles($tempDir, $includeVendor, $includeConfig);
+            $this->copySourceFiles($tempDir, $includeUploads, $includeVendor, $includeConfig);
 
             // 4. Create internal metadata
             $this->updateProgress('running', 70, 'Creating metadata...');
@@ -110,8 +142,8 @@ class MigrationService
 
             $this->updateProgress('running', 95, 'Cleaning up temp files...');
             $this->log('Step 6: Cleaning up temp files...');
-            $this->deleteDirectory(storage_path('migration_temp'));
-            
+            $this->deleteDirectory($tempDir);
+
             $size = filesize($zipPath);
             $sizeFormatted = $this->formatBytes($size);
             $this->log("✓ SUCCESS! Backup created: {$backupName}.zip ({$sizeFormatted})");
@@ -134,6 +166,8 @@ class MigrationService
                 $this->deleteDirectory($tempDir);
             }
             throw $e;
+        } finally {
+            $this->releaseLock();
         }
     }
 
@@ -145,9 +179,12 @@ class MigrationService
         @set_time_limit(0);
         @ini_set('memory_limit', '1024M');
 
-        if (!file_exists($zipPath)) {
-            throw new \Exception("Backup file not found at: " . $zipPath);
+        if (!is_file($zipPath)) {
+            throw new \Exception("Backup file not found: " . basename($zipPath));
         }
+
+        $this->assertZipAvailable();
+        $this->acquireLock();
 
         $this->updateProgress('running', 5, 'Starting migration...');
         $this->log("Starting migration process from: " . basename($zipPath));
@@ -165,16 +202,26 @@ class MigrationService
             $zip->extractTo($extractDir);
             $zip->close();
 
+            $metadata = [];
+            if (file_exists($extractDir . '/metadata.json')) {
+                $metadata = json_decode(file_get_contents($extractDir . '/metadata.json'), true) ?: [];
+            }
+
+            // The imported tables keep the prefix of the source forum
+            if (isset($metadata['db_prefix'])) {
+                $configData['db_prefix'] = $metadata['db_prefix'];
+            }
+
             // 2. Database Import
             $this->updateProgress('running', 35, 'Importing database...');
-            $this->log("Step 2: Replacing database (Safety mode)...");
+            $this->log("Step 2: Importing database...");
             $sqlFile = $extractDir . '/database.sql';
             if (file_exists($sqlFile)) {
                 $this->importDatabase(
-                    $sqlFile, 
-                    $configData['db_host'], 
-                    $configData['db_name'], 
-                    $configData['db_user'], 
+                    $sqlFile,
+                    $configData['db_host'],
+                    $configData['db_name'],
+                    $configData['db_user'],
                     $configData['db_pass']
                 );
             }
@@ -182,7 +229,7 @@ class MigrationService
             // 3. File Replacement
             $this->updateProgress('running', 60, 'Replacing files and folders (Safety mode)...');
             $this->log("Step 3: Replacing files and folders (Safety: renaming existing items to _old)...");
-            $this->replaceFilesFromBackup($extractDir);
+            $this->replaceFilesFromBackup($extractDir, $metadata['include_uploads'] ?? true);
 
             // 4. Update config.php
             $this->updateProgress('running', 85, 'Updating configuration...');
@@ -206,154 +253,296 @@ class MigrationService
             $this->log("FATAL ERROR DURING MIGRATE: " . $e->getMessage(), "error");
             if (is_dir($extractDir)) $this->deleteDirectory($extractDir);
             throw $e;
+        } finally {
+            $this->releaseLock();
         }
+    }
+
+    /**
+     * Paths (relative to the site root) that hold user uploads
+     */
+    protected function uploadPaths()
+    {
+        $assets = ltrim(substr(public_path('assets'), strlen(base_path())), '/');
+
+        return [$assets . '/avatars', $assets . '/files'];
     }
 
     /**
      * Copy all files and folders from root, applying exclusions
      */
-    protected function copySourceFiles($tempDir, $includeVendor, $includeConfig = false)
+    protected function copySourceFiles($tempDir, $includeUploads, $includeVendor, $includeConfig = false)
     {
         $rootPath = base_path();
         $items = scandir($rootPath);
-        
+
         $exclude = ['current', 'storage', 'vendor', '.', '..', '.git', 'node_modules', 'migration_temp', 'migration_upload'];
-        
+
         if ($includeVendor) {
             $exclude = array_diff($exclude, ['vendor']);
         }
-        
+
         if (!$includeConfig) {
             $exclude[] = 'config.php';
+        }
+
+        $excludePaths = [];
+        if (!$includeUploads) {
+            foreach ($this->uploadPaths() as $path) {
+                $excludePaths[] = $rootPath . '/' . $path;
+            }
         }
 
         foreach ($items as $item) {
             if (in_array($item, $exclude) || str_ends_with($item, '_old')) continue;
 
-            $src = $rootPath . '/' . $item;
-            $dst = $tempDir . '/' . $item;
-
-            if (is_dir($src)) {
-                $this->recursiveCopy($src, $dst);
-            } else {
-                copy($src, $dst);
-            }
+            $this->copyItem($rootPath . '/' . $item, $tempDir . '/' . $item, $excludePaths);
         }
 
         // Special handling for storage: essential data only
         $storagePath = storage_path();
         $storageItems = array_diff(scandir($storagePath), ['.', '..', 'backups', 'logs', 'sessions', 'views', 'cache', 'migration_temp', 'migration_upload']);
-        
+
         foreach ($storageItems as $sItem) {
             if (str_ends_with($sItem, '_old')) continue;
-            $src = $storagePath . '/' . $sItem;
-            $dst = $tempDir . '/storage/' . $sItem;
-            
-            if (is_dir($src)) {
-                $this->recursiveCopy($src, $dst);
-            } else {
-                @mkdir(dirname($dst), 0755, true);
-                copy($src, $dst);
-            }
+            @mkdir($tempDir . '/storage', 0755, true);
+            $this->copyItem($storagePath . '/' . $sItem, $tempDir . '/storage/' . $sItem);
         }
     }
 
     /**
-     * Import database: clearing tables first
+     * Import a SQL dump. Tables are replaced by the DROP/CREATE statements of the dump;
+     * tables that are not part of the dump are left untouched.
      */
-    protected function importDatabase($sqlFile, $host, $database, $username, $password)
+    public function importDatabase($sqlFile, $host, $database, $username, $password)
     {
         $this->log("Importing database into {$database} @ {$host}...");
-        
-        $pdo = new \PDO("mysql:host={$host};dbname={$database}", $username, $password, [
+
+        $port = app('flarum.config')['database']['port'] ?? 3306;
+
+        $pdo = new \PDO("mysql:host={$host};port={$port};dbname={$database}", $username, $password, [
             \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
             \PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4"
         ]);
 
-        $sql = file_get_contents($sqlFile);
-        $sql = preg_replace('/--.*$/m', '', $sql);
-        $sql = preg_replace('/\/\*.*?\*\//s', '', $sql);
-        
         $pdo->exec("SET FOREIGN_KEY_CHECKS=0");
-        
-        $this->log(" -> Clearing existing tables...");
-        $tables = $pdo->query('SHOW TABLES')->fetchAll(\PDO::FETCH_COLUMN);
-        foreach ($tables as $table) {
-            $pdo->exec("DROP TABLE IF EXISTS `{$table}`");
-        }
 
         $this->log(" -> Executing SQL dump...");
-        $statements = explode(";\n", $sql);
-        foreach ($statements as $statement) {
-            $statement = trim($statement);
-            if (!empty($statement)) {
-                try {
-                    $pdo->exec($statement);
-                } catch (\Exception $e) {
-                    $this->log("SQL Exec warning: " . substr($e->getMessage(), 0, 100), "warning");
-                }
+        $executed = 0;
+        $failed = 0;
+        $firstError = null;
+
+        $this->parseSqlFile($sqlFile, function ($statement) use ($pdo, &$executed, &$failed, &$firstError) {
+            try {
+                $pdo->exec($statement);
+                $executed++;
+            } catch (\Exception $e) {
+                $failed++;
+                $firstError = $firstError ?: $e->getMessage();
+                $this->log("SQL error: " . substr($e->getMessage(), 0, 200) . " | Statement: " . substr($statement, 0, 120), "error");
             }
-        }
+        });
+
         $pdo->exec("SET FOREIGN_KEY_CHECKS=1");
 
-        $this->log("Database imported successfully.");
+        if ($failed > 0) {
+            throw new \Exception("Database import finished with {$failed} failed statement(s) out of " . ($executed + $failed) . ". First error: " . substr($firstError, 0, 200));
+        }
+
+        $this->log("Database imported successfully ({$executed} statements).");
     }
 
     /**
-     * Rename existing files to _old and copy new ones
+     * Stream a SQL file and pass each statement to the callback.
+     * Delimiters and comments are only recognised outside of quoted strings,
+     * so post content containing ";", "--" or "/*" is preserved.
      */
-    protected function replaceFilesFromBackup($extractDir)
+    protected function parseSqlFile($sqlFile, callable $onStatement)
+    {
+        $handle = fopen($sqlFile, 'rb');
+        if (!$handle) {
+            throw new \Exception("Cannot open SQL file: " . basename($sqlFile));
+        }
+
+        $statement = '';
+        $quote = null;
+        $escaped = false;
+        $inBlockComment = false;
+
+        try {
+            while (($line = fgets($handle)) !== false) {
+                $len = strlen($line);
+                $i = 0;
+
+                while ($i < $len) {
+                    if ($inBlockComment) {
+                        $end = strpos($line, '*/', $i);
+                        if ($end === false) {
+                            break;
+                        }
+                        $inBlockComment = false;
+                        $i = $end + 2;
+                        continue;
+                    }
+
+                    if ($quote !== null) {
+                        if ($escaped) {
+                            $statement .= $line[$i++];
+                            $escaped = false;
+                            continue;
+                        }
+                        $span = strcspn($line, $quote . '\\', $i);
+                        $statement .= substr($line, $i, $span);
+                        $i += $span;
+                        if ($i >= $len) break;
+
+                        $c = $line[$i++];
+                        $statement .= $c;
+                        if ($c === '\\') {
+                            $escaped = $quote !== '`';
+                        } else {
+                            $quote = null;
+                        }
+                        continue;
+                    }
+
+                    $span = strcspn($line, "'\"`;-#/", $i);
+                    $statement .= substr($line, $i, $span);
+                    $i += $span;
+                    if ($i >= $len) break;
+
+                    $c = $line[$i];
+                    $next = $line[$i + 1] ?? '';
+
+                    if ($c === ';') {
+                        $statement = trim($statement);
+                        if ($statement !== '') {
+                            $onStatement($statement);
+                        }
+                        $statement = '';
+                        $i++;
+                    } elseif ($c === '#' || ($c === '-' && $next === '-' && ctype_space($line[$i + 2] ?? "\n"))) {
+                        // Line comment: skip the rest of the line
+                        $statement .= "\n";
+                        break;
+                    } elseif ($c === '/' && $next === '*') {
+                        $inBlockComment = true;
+                        $i += 2;
+                    } else {
+                        if ($c === "'" || $c === '"' || $c === '`') {
+                            $quote = $c;
+                        }
+                        $statement .= $c;
+                        $i++;
+                    }
+                }
+            }
+        } finally {
+            fclose($handle);
+        }
+
+        $statement = trim($statement);
+        if ($statement !== '') {
+            $onStatement($statement);
+        }
+    }
+
+    /**
+     * Rename the existing items that the backup replaces to _old and copy the new ones.
+     * If anything fails, the renamed items are restored.
+     */
+    protected function replaceFilesFromBackup($extractDir, $backupHasUploads = true)
     {
         $rootPath = base_path();
-        
-        $this->log(" -> Backing up current root items to _old...");
-        $protected = ['storage', 'config.php', 'vendor', '.git', 'node_modules', '.env', 'migration_temp', 'migration_upload'];
-        $itemsInRoot = scandir($rootPath);
-        
-        foreach ($itemsInRoot as $item) {
-            if (in_array($item, $protected) || $item === '.' || $item === '..') continue;
-            if (str_ends_with($item, '_old')) continue;
-            
-            $oldPath = $rootPath . '/' . $item;
-            $newPath = $rootPath . '/' . $item . '_old';
-            
-            if (file_exists($newPath)) {
-                is_dir($newPath) ? $this->deleteDirectory($newPath) : @unlink($newPath);
+
+        $backupItems = array_values(array_diff(
+            scandir($extractDir),
+            array_merge(['.', '..', 'config.php', 'storage', '.env'], self::BACKUP_META_ITEMS)
+        ));
+
+        // Without vendor in the backup, its composer files would not match the installed packages
+        if (!in_array('vendor', $backupItems)) {
+            foreach (['composer.json', 'composer.lock'] as $composerFile) {
+                if (in_array($composerFile, $backupItems)) {
+                    copy($extractDir . '/' . $composerFile, $rootPath . '/' . $composerFile . '.from_backup');
+                    $this->log(" -> Kept current {$composerFile}; the backup version was saved as {$composerFile}.from_backup. Run composer to install the source forum's extensions if needed.", 'warning');
+                }
             }
-            
-            @rename($oldPath, $newPath);
+            $backupItems = array_values(array_diff($backupItems, ['composer.json', 'composer.lock']));
         }
 
-        $this->log(" -> Copying new files from backup...");
-        $backupItems = array_diff(scandir($extractDir), ['.', '..', 'database.sql', 'settings.json', 'metadata.json', 'migrate.sh', 'config.php', 'storage']);
+        $renamed = [];
 
-        foreach ($backupItems as $item) {
-            $src = $extractDir . '/' . $item;
-            $dst = $rootPath . '/' . $item;
+        try {
+            $this->log(" -> Renaming items replaced by the backup to _old...");
+            foreach ($backupItems as $item) {
+                if (in_array($item, self::PROTECTED_ITEMS)) continue;
 
-            if (is_dir($src)) {
-                $this->recursiveCopy($src, $dst);
-            } else {
-                copy($src, $dst);
+                $current = $rootPath . '/' . $item;
+                if (!file_exists($current) && !is_link($current)) continue;
+
+                $this->renameToOld($current);
+                $renamed[] = $item;
             }
-        }
-        
-        $this->log(" -> Updating assets (safety: renaming old to _old)...");
-        $srcAssets = $extractDir . '/storage/assets';
-        $assetPaths = [public_path('assets'), base_path('assets')];
-        
-        foreach ($assetPaths as $dstAssets) {
-            if (is_dir($srcAssets) && is_dir($dstAssets)) {
-                $oldAssets = $dstAssets . '_old';
-                if (is_dir($oldAssets)) $this->deleteDirectory($oldAssets);
-                @rename($dstAssets, $oldAssets);
-                $this->recursiveCopy($srcAssets, $dstAssets);
+
+            $this->log(" -> Copying new files from backup...");
+            foreach ($backupItems as $item) {
+                $this->copyItem($extractDir . '/' . $item, $rootPath . '/' . $item);
             }
+
+            if (!$backupHasUploads) {
+                $this->log(" -> Backup has no uploads, carrying over existing uploaded files...");
+                foreach ($this->uploadPaths() as $path) {
+                    $segments = explode('/', $path, 2);
+                    $oldPath = $rootPath . '/' . $segments[0] . '_old' . (isset($segments[1]) ? '/' . $segments[1] : '');
+                    if (in_array($segments[0], $renamed) && is_dir($oldPath)) {
+                        $this->recursiveCopy($oldPath, $rootPath . '/' . $path);
+                    }
+                }
+            }
+
+            $srcAssets = $extractDir . '/storage/assets';
+            if (is_dir($srcAssets)) {
+                $this->log(" -> Updating assets (safety: renaming old to _old)...");
+                foreach (array_unique([public_path('assets'), base_path('assets')]) as $dstAssets) {
+                    if (is_dir($dstAssets)) {
+                        $this->renameToOld($dstAssets);
+                        $this->recursiveCopy($srcAssets, $dstAssets);
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->log(" -> File replacement failed, restoring original items...", 'error');
+            foreach (array_reverse($renamed) as $item) {
+                $current = $rootPath . '/' . $item;
+                if (is_dir($current) && !is_link($current)) {
+                    $this->deleteDirectory($current);
+                } elseif (file_exists($current) || is_link($current)) {
+                    @unlink($current);
+                }
+                @rename($current . '_old', $current);
+            }
+            throw $e;
         }
-        
+
         if (is_dir($extractDir . '/storage')) {
             $this->log(" -> Merging other storage directories...");
-            $this->recursiveCopy($extractDir . '/storage', $rootPath . '/storage');
+            $this->recursiveCopy($extractDir . '/storage', storage_path());
+        }
+    }
+
+    protected function renameToOld($path)
+    {
+        $oldPath = $path . '_old';
+
+        if (is_dir($oldPath) && !is_link($oldPath)) {
+            $this->deleteDirectory($oldPath);
+        } elseif (file_exists($oldPath) || is_link($oldPath)) {
+            @unlink($oldPath);
+        }
+
+        if (!rename($path, $oldPath)) {
+            throw new \Exception('Could not rename ' . basename($path) . ' to ' . basename($oldPath) . '. Check file permissions.');
         }
     }
 
@@ -370,7 +559,7 @@ class MigrationService
             if (str_ends_with($item, '_old')) {
                 $p = $rootPath . '/' . $item;
                 $this->log("Cleaning up: $item");
-                is_dir($p) ? $this->deleteDirectory($p) : @unlink($p);
+                is_dir($p) && !is_link($p) ? $this->deleteDirectory($p) : @unlink($p);
                 $count++;
             }
         }
@@ -396,11 +585,12 @@ class MigrationService
         if (!file_exists($configPath)) return;
 
         $config = include $configPath;
-        
+
         if (!empty($data['db_host'])) $config['database']['host'] = $data['db_host'];
         if (!empty($data['db_name'])) $config['database']['database'] = $data['db_name'];
         if (!empty($data['db_user'])) $config['database']['username'] = $data['db_user'];
         if (!empty($data['db_pass'])) $config['database']['password'] = $data['db_pass'];
+        if (isset($data['db_prefix'])) $config['database']['prefix'] = $data['db_prefix'];
         if (!empty($data['new_url'])) $config['url'] = $data['new_url'];
 
         $content = "<?php return " . var_export($config, true) . ";";
@@ -414,30 +604,45 @@ class MigrationService
     protected function exportDatabase($filePath)
     {
         $this->log("Starting native PHP database export...");
-        
+
+        $pdo = $this->db->getPdo();
+        $prefix = $this->db->getTablePrefix();
+
         try {
             $handle = fopen($filePath, 'w');
-            if (!$handle) throw new \Exception("Cannot open file for writing: " . $filePath);
+            if (!$handle) throw new \Exception("Cannot open file for writing: " . basename($filePath));
 
             fwrite($handle, "-- Flarum Native PHP Backup\n-- Date: " . date('Y-m-d H:i:s') . "\n\nSET FOREIGN_KEY_CHECKS=0;\nSET NAMES utf8mb4;\n\n");
 
-            $tables = $this->db->getPdo()->query('SHOW TABLES')->fetchAll(\PDO::FETCH_COLUMN);
+            $tables = $pdo->query("SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'")->fetchAll(\PDO::FETCH_COLUMN);
+
+            // Only export this forum's tables when the database is shared via a prefix
+            if ($prefix !== '') {
+                $tables = array_values(array_filter($tables, fn($t) => str_starts_with($t, $prefix)));
+            }
 
             foreach ($tables as $tableName) {
-                $createStmt = $this->db->getPdo()->query("SHOW CREATE TABLE `{$tableName}`")->fetch(\PDO::FETCH_ASSOC);
+                $createStmt = $pdo->query("SHOW CREATE TABLE `{$tableName}`")->fetch(\PDO::FETCH_ASSOC);
                 $createSql = array_values($createStmt)[1];
 
                 fwrite($handle, "DROP TABLE IF EXISTS `{$tableName}`;\n" . $createSql . ";\n\n");
 
-                $stmt = $this->db->getPdo()->query("SELECT * FROM `{$tableName}`");
-                while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
-                    $columns = array_keys($row);
-                    $values = array_map(function($value) {
-                        return $value === null ? 'NULL' : $this->db->getPdo()->quote($value);
-                    }, array_values($row));
+                // Stream rows instead of loading the whole table into memory
+                $pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+                try {
+                    $stmt = $pdo->query("SELECT * FROM `{$tableName}`");
+                    while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                        $columns = array_keys($row);
+                        $values = array_map(function($value) use ($pdo) {
+                            return $value === null ? 'NULL' : $pdo->quote($value);
+                        }, array_values($row));
 
-                    $sql = "INSERT INTO `{$tableName}` (`" . implode("`, `", $columns) . "`) VALUES (" . implode(", ", $values) . ");\n";
-                    fwrite($handle, $sql);
+                        $sql = "INSERT INTO `{$tableName}` (`" . implode("`, `", $columns) . "`) VALUES (" . implode(", ", $values) . ");\n";
+                        fwrite($handle, $sql);
+                    }
+                    $stmt->closeCursor();
+                } finally {
+                    $pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
                 }
                 fwrite($handle, "\n");
             }
@@ -468,9 +673,10 @@ class MigrationService
             'flarum_version' => \Flarum\Foundation\Application::VERSION,
             'php' => PHP_VERSION,
             'db_name' => $this->db->getDatabaseName(),
+            'db_prefix' => $this->db->getTablePrefix(),
             'url' => app('flarum.config')['url'],
-            'include_uploads' => $includeUploads,
-            'include_vendor' => $includeVendor,
+            'include_uploads' => (bool) $includeUploads,
+            'include_vendor' => (bool) $includeVendor,
         ];
         file_put_contents($tempDir . '/metadata.json', json_encode($metadata, JSON_PRETTY_PRINT));
     }
@@ -486,10 +692,10 @@ class MigrationService
     {
         $zip = new ZipArchive();
         if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) throw new \Exception("Zip failed");
-        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($sourceDir), \RecursiveIteratorIterator::LEAVES_ONLY);
+        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($sourceDir, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::LEAVES_ONLY);
         foreach ($files as $file) {
             if (!$file->isDir()) {
-                $zip->addFile($file->getRealPath(), substr($file->getRealPath(), strlen($sourceDir) + 1));
+                $zip->addFile($file->getPathname(), substr($file->getPathname(), strlen($sourceDir) + 1));
             }
         }
         $zip->close();
@@ -536,22 +742,45 @@ class MigrationService
         return array_slice(file($this->logPath), -$lines);
     }
 
-    public function recursiveCopy($src, $dst)
+    /**
+     * Copy a file, directory or symlink
+     */
+    protected function copyItem($src, $dst, array $excludePaths = [])
     {
-        if (!is_dir($src)) return;
+        if (is_link($src)) {
+            if (file_exists($dst) || is_link($dst)) @unlink($dst);
+            symlink(readlink($src), $dst);
+        } elseif (is_dir($src)) {
+            $this->recursiveCopy($src, $dst, $excludePaths);
+        } else {
+            copy($src, $dst);
+        }
+    }
+
+    /**
+     * Recursively copy a directory. Symlinks are recreated, not followed.
+     */
+    public function recursiveCopy($src, $dst, array $excludePaths = [])
+    {
+        if (!is_dir($src) || in_array($src, $excludePaths)) return;
         @mkdir($dst, 0755, true);
         foreach (scandir($src) as $f) {
             if ($f === '.' || $f === '..') continue;
-            is_dir("$src/$f") ? $this->recursiveCopy("$src/$f", "$dst/$f") : copy("$src/$f", "$dst/$f");
+            if (in_array("$src/$f", $excludePaths)) continue;
+            $this->copyItem("$src/$f", "$dst/$f", $excludePaths);
         }
     }
 
     public function deleteDirectory($dir)
     {
+        if (is_link($dir)) {
+            unlink($dir);
+            return;
+        }
         if (!is_dir($dir)) return;
         foreach (array_diff(scandir($dir), ['.', '..']) as $f) {
             $p = "$dir/$f";
-            is_dir($p) ? $this->deleteDirectory($p) : unlink($p);
+            is_dir($p) && !is_link($p) ? $this->deleteDirectory($p) : unlink($p);
         }
         rmdir($dir);
     }
@@ -563,6 +792,9 @@ class MigrationService
         return round($b, $p) . ' ' . $u[$i];
     }
 
+    /**
+     * Current connection settings for prefilling the admin form. The password is never exposed.
+     */
     public function getCurrentConfig()
     {
         $config = app('flarum.config');
@@ -570,8 +802,16 @@ class MigrationService
             'db_host' => $config['database']['host'] ?? 'localhost',
             'db_name' => $config['database']['database'] ?? '',
             'db_user' => $config['database']['username'] ?? '',
-            'db_pass' => $config['database']['password'] ?? '',
+            'has_db_pass' => !empty($config['database']['password']),
             'url' => $config['url'] ?? '',
         ];
+    }
+
+    /**
+     * Current database password, used when the admin leaves the password field empty
+     */
+    public function getCurrentDbPassword()
+    {
+        return app('flarum.config')['database']['password'] ?? '';
     }
 }
