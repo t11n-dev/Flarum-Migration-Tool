@@ -53,9 +53,12 @@ class MigrateCommand extends AbstractCommand
             ];
 
             $this->info('Running migration...');
-            $service->performMigration($backupFile, $configData);
+            $result = $service->performMigration($backupFile, $configData);
 
             $this->info('✓ Migration Completed Successfully!');
+            foreach ($result['warnings'] ?? [] as $warning) {
+                $this->warn('⚠️  ' . $warning);
+            }
 
         } catch (\Throwable $e) {
             $this->error('Migration failed: ' . $e->getMessage());

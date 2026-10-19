@@ -1,7 +1,6 @@
 {
-    "name": "nauhyuh/flarum-migration-tool",
+    "name": "t11n-dev/flarum-migration-tool",
     "description": "Complete migration tool with admin UI for easy Flarum server transfer. Backup, restore, and migrate your forum with just a few clicks.",
-    "version": "2.5.0",
     "type": "flarum-extension",
     "keywords": [
         "flarum",
@@ -22,11 +21,11 @@
         }
     ],
     "support": {
-        "issues": "https://github.com/nauhyuh/flarum-migration-tool/issues",
-        "source": "https://github.com/nauhyuh/flarum-migration-tool",
+        "issues": "https://github.com/t11n-dev/Flarum-Migration-Tool/issues",
+        "source": "https://github.com/t11n-dev/Flarum-Migration-Tool",
         "forum": "https://discuss.flarum.org/d/your-discussion-id"
     },
-    "homepage": "https://github.com/nauhyuh/flarum-migration-tool",
+    "homepage": "https://github.com/t11n-dev/Flarum-Migration-Tool",
     "funding": [
         {
             "type": "github",

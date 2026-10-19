@@ -1,5 +1,5 @@
 {
-  "name": "@nauhyuh/flarum-migration-tool",
+  "name": "@t11n-dev/flarum-migration-tool",
   "version": "2.5.0",
   "description": "Flarum migration tool with admin UI",
   "main": "src/admin/index.js",

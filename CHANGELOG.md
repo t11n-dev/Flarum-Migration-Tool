@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [2.5.0] - 2026-10-19
 
+### Changed
+- The package moved to `t11n-dev/flarum-migration-tool` (repository: https://github.com/t11n-dev/Flarum-Migration-Tool). The extension ID is now `t11n-dev-migration-tool`; re-enable the extension after switching.
+
+### Added
+- Data completeness checks: the backup records the row count of every table and the import verifies them; any difference fails the migration.
+- Backups are read from a consistent snapshot, so data stays coherent while the forum is in use.
+- Every new backup ZIP is verified after creation; uploaded backups are integrity-checked before extraction.
+- After migration the cache is cleared automatically, and warnings are shown for a different Flarum version or for extensions enabled on the source forum but not installed on the destination.
+
 ### Fixed
 - Database import no longer corrupts data: the SQL dump is streamed and split with a quote-aware parser, so post content containing `;`, `--` or `/* */` is preserved. Failed statements now fail the migration instead of being logged as warnings.
 - Import no longer drops every table in the target database; only tables contained in the dump are replaced.
@@ -12,7 +21,12 @@ All notable changes to this project will be documented in this file.
 - "Include uploaded files" now actually excludes `assets/avatars` and `assets/files`; restoring such a backup keeps the existing uploads.
 - `migration:migrate` and `migration:import` crashed (missing console helpers, protected method call).
 - A missing `zip` extension no longer breaks every `php flarum` command.
-- Backups and migrations can no longer run concurrently; symlinks are recreated instead of followed.
+- TIMESTAMP values are exported and imported in UTC, so they are not shifted between servers in different time zones.
+- Import works on servers with strict SQL mode (zero dates) and keeps rows with id 0.
+- Binary (BLOB) and BIT columns are exported losslessly.
+- Empty directories (e.g. an empty uploads folder) are kept in the backup.
+- Symlinked files and directories are included in backups with their real content (with loop protection); restores recreate symlinks.
+- Backups and migrations can no longer run concurrently.
 
 ### Security
 - The database password is no longer sent to the admin UI; leaving the password field empty keeps the current one.

@@ -46,7 +46,7 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 ```bash
 # Clone your fork
-git clone https://github.com/nauhyuh/flarum-migration-tool
+git clone https://github.com/t11n-dev/Flarum-Migration-Tool
 cd flarum-migration-tool
 
 # Install dependencies

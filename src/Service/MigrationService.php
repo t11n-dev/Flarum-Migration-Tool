@@ -114,7 +114,7 @@ class MigrationService
             // 1. Export database
             $this->updateProgress('running', 10, 'Exporting database...');
             $this->log('Step 1: Exporting database...');
-            $this->exportDatabase($tempDir . '/database.sql');
+            $rowCounts = $this->exportDatabase($tempDir . '/database.sql');
 
             // 2. Export settings
             $this->updateProgress('running', 25, 'Exporting settings...');
@@ -129,19 +129,23 @@ class MigrationService
             // 4. Create internal metadata
             $this->updateProgress('running', 70, 'Creating metadata...');
             $this->log('Step 4: Creating metadata and scripts...');
-            $this->createMetadata($tempDir, $includeUploads, $includeVendor);
+            $this->createMetadata($tempDir, $includeUploads, $includeVendor, $rowCounts);
             $this->createMigrationScript($tempDir);
 
             // 5. Pack everything
             $this->updateProgress('running', 80, 'Compressing to ZIP...');
             $this->log('Step 5: Compressing to ZIP...');
             $zipPath = $this->backupPath . '/' . $backupName . '.zip';
-            $this->createZip($tempDir, $zipPath);
+            $fileCount = $this->createZip($tempDir, $zipPath);
+
+            $this->updateProgress('running', 90, 'Verifying backup...');
+            $this->log('Step 6: Verifying ZIP integrity...');
+            $this->verifyZip($zipPath, $fileCount);
 
             chmod($zipPath, 0664);
 
             $this->updateProgress('running', 95, 'Cleaning up temp files...');
-            $this->log('Step 6: Cleaning up temp files...');
+            $this->log('Step 7: Cleaning up temp files...');
             $this->deleteDirectory($tempDir);
 
             $size = filesize($zipPath);
@@ -194,18 +198,8 @@ class MigrationService
             // 1. Extract backup
             $this->updateProgress('running', 15, 'Extracting backup...');
             $this->log("Step 1: Extracting backup...");
-            $zip = new ZipArchive();
-            if ($zip->open($zipPath) !== true) {
-                throw new \Exception("Could not open ZIP file.");
-            }
-            mkdir($extractDir, 0755, true);
-            $zip->extractTo($extractDir);
-            $zip->close();
-
-            $metadata = [];
-            if (file_exists($extractDir . '/metadata.json')) {
-                $metadata = json_decode(file_get_contents($extractDir . '/metadata.json'), true) ?: [];
-            }
+            $metadata = $this->extractBackup($zipPath, $extractDir);
+            $warnings = [];
 
             // The imported tables keep the prefix of the source forum
             if (isset($metadata['db_prefix'])) {
@@ -222,9 +216,14 @@ class MigrationService
                     $configData['db_host'],
                     $configData['db_name'],
                     $configData['db_user'],
-                    $configData['db_pass']
+                    $configData['db_pass'],
+                    $metadata['tables'] ?? null
                 );
+            } else {
+                throw new \Exception('The backup does not contain database.sql.');
             }
+
+            $warnings = array_merge($warnings, $this->compatibilityWarnings($metadata));
 
             // 3. File Replacement
             $this->updateProgress('running', 60, 'Replacing files and folders (Safety mode)...');
@@ -237,15 +236,22 @@ class MigrationService
             $this->updateConfig($configData);
 
             // Final Cleanup
-            $this->updateProgress('running', 95, 'Finalizing...');
+            $this->updateProgress('running', 95, 'Clearing cache...');
+            if (!$this->clearCache()) {
+                $warnings[] = 'Could not clear the cache automatically. Run "php flarum cache:clear".';
+            }
             $this->deleteDirectory($extractDir);
+            foreach ($warnings as $warning) {
+                $this->log('WARNING: ' . $warning, 'warning');
+            }
             $this->log("✓ MIGRATION SUCCESSFUL!");
 
             $this->updateProgress('complete', 100, 'Migration finished!');
 
             return [
                 'success' => true,
-                'message' => 'Migration completed successfully. Old files have been renamed to _old.'
+                'message' => 'Migration completed successfully. Old files have been renamed to _old.',
+                'warnings' => $warnings,
             ];
 
         } catch (\Throwable $e) {
@@ -255,6 +261,76 @@ class MigrationService
             throw $e;
         } finally {
             $this->releaseLock();
+        }
+    }
+
+    /**
+     * Extract and integrity-check a backup ZIP. Returns its metadata.
+     */
+    public function extractBackup($zipPath, $extractDir)
+    {
+        $zip = new ZipArchive();
+        if ($zip->open($zipPath, ZipArchive::CHECKCONS) !== true) {
+            throw new \Exception('Could not open the ZIP file or it is corrupted. Please upload the backup again.');
+        }
+        if (!is_dir($extractDir)) {
+            mkdir($extractDir, 0755, true);
+        }
+        if (!$zip->extractTo($extractDir)) {
+            $zip->close();
+            throw new \Exception('Extracting the backup failed (corrupted file or not enough disk space).');
+        }
+        $zip->close();
+
+        $metadata = [];
+        if (file_exists($extractDir . '/metadata.json')) {
+            $metadata = json_decode(file_get_contents($extractDir . '/metadata.json'), true) ?: [];
+        }
+
+        return $metadata;
+    }
+
+    /**
+     * Differences between the source forum and this installation that may hide data
+     */
+    protected function compatibilityWarnings(array $metadata)
+    {
+        $warnings = [];
+
+        $sourceVersion = $metadata['flarum_version'] ?? null;
+        if ($sourceVersion && $sourceVersion !== \Flarum\Foundation\Application::VERSION) {
+            $warnings[] = "The backup was made with Flarum {$sourceVersion}, this server runs " . \Flarum\Foundation\Application::VERSION . '. Run "php flarum migrate" to update the database.';
+        }
+
+        $enabled = $metadata['extensions_enabled'] ?? [];
+        if ($enabled) {
+            try {
+                $installed = app(\Flarum\Extension\ExtensionManager::class)->getExtensions()->keys()->all();
+                $missing = array_values(array_diff($enabled, $installed));
+                if ($missing) {
+                    $warnings[] = 'These extensions were enabled on the source forum but are not installed here, so their data will not be visible until you install them: ' . implode(', ', $missing);
+                }
+            } catch (\Throwable $e) {
+                $this->log('Could not compare installed extensions: ' . $e->getMessage(), 'warning');
+            }
+        }
+
+        return $warnings;
+    }
+
+    /**
+     * Run Flarum's cache:clear so the restored settings, extensions and assets are picked up
+     */
+    protected function clearCache()
+    {
+        try {
+            $command = app(\Flarum\Foundation\Console\CacheClearCommand::class);
+            $command->run(new \Symfony\Component\Console\Input\ArrayInput([]), new \Symfony\Component\Console\Output\NullOutput());
+            $this->log('Cache cleared.');
+            return true;
+        } catch (\Throwable $e) {
+            $this->log('Cache clear failed: ' . $e->getMessage(), 'warning');
+            return false;
         }
     }
 
@@ -296,7 +372,7 @@ class MigrationService
         foreach ($items as $item) {
             if (in_array($item, $exclude) || str_ends_with($item, '_old')) continue;
 
-            $this->copyItem($rootPath . '/' . $item, $tempDir . '/' . $item, $excludePaths);
+            $this->copyForBackup($rootPath . '/' . $item, $tempDir . '/' . $item, $excludePaths);
         }
 
         // Special handling for storage: essential data only
@@ -306,7 +382,7 @@ class MigrationService
         foreach ($storageItems as $sItem) {
             if (str_ends_with($sItem, '_old')) continue;
             @mkdir($tempDir . '/storage', 0755, true);
-            $this->copyItem($storagePath . '/' . $sItem, $tempDir . '/storage/' . $sItem);
+            $this->copyForBackup($storagePath . '/' . $sItem, $tempDir . '/storage/' . $sItem);
         }
     }
 
@@ -314,7 +390,7 @@ class MigrationService
      * Import a SQL dump. Tables are replaced by the DROP/CREATE statements of the dump;
      * tables that are not part of the dump are left untouched.
      */
-    public function importDatabase($sqlFile, $host, $database, $username, $password)
+    public function importDatabase($sqlFile, $host, $database, $username, $password, ?array $expectedCounts = null)
     {
         $this->log("Importing database into {$database} @ {$host}...");
 
@@ -325,6 +401,10 @@ class MigrationService
             \PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4"
         ]);
 
+        // Same session settings as the export, independent of this server's defaults:
+        // no strict mode (zero dates), keep explicit 0 ids, UTC timestamps
+        $pdo->exec("SET SESSION sql_mode = 'NO_AUTO_VALUE_ON_ZERO'");
+        $pdo->exec("SET SESSION time_zone = '+00:00'");
         $pdo->exec("SET FOREIGN_KEY_CHECKS=0");
 
         $this->log(" -> Executing SQL dump...");
@@ -334,7 +414,8 @@ class MigrationService
 
         $this->parseSqlFile($sqlFile, function ($statement) use ($pdo, &$executed, &$failed, &$firstError) {
             try {
-                $pdo->exec($statement);
+                // query() + closeCursor() also handles statements that return rows
+                $pdo->query($statement)->closeCursor();
                 $executed++;
             } catch (\Exception $e) {
                 $failed++;
@@ -350,6 +431,30 @@ class MigrationService
         }
 
         $this->log("Database imported successfully ({$executed} statements).");
+
+        if ($expectedCounts === null) {
+            $this->log(" -> Backup has no row counts (created by an older version), skipping verification.", 'warning');
+            return;
+        }
+
+        $this->log(" -> Verifying row counts of " . count($expectedCounts) . " tables...");
+        $mismatches = [];
+        foreach ($expectedCounts as $table => $expected) {
+            try {
+                $actual = (int) $pdo->query("SELECT COUNT(*) FROM `" . str_replace('`', '``', $table) . "`")->fetchColumn();
+            } catch (\Exception $e) {
+                $actual = 'missing';
+            }
+            if ($actual !== (int) $expected) {
+                $mismatches[] = "{$table} (expected {$expected}, got {$actual})";
+            }
+        }
+
+        if ($mismatches) {
+            throw new \Exception('Database verification failed, imported data is incomplete: ' . implode('; ', $mismatches));
+        }
+
+        $this->log(" -> All tables verified.");
     }
 
     /**
@@ -601,18 +706,32 @@ class MigrationService
     /**
      * Database Export Logic - Pure PHP
      */
+    /**
+     * Export the forum's tables. Returns the number of rows exported per table,
+     * which is stored in the metadata and checked again after import.
+     */
     protected function exportDatabase($filePath)
     {
         $this->log("Starting native PHP database export...");
 
         $pdo = $this->db->getPdo();
         $prefix = $this->db->getTablePrefix();
+        $rowCounts = [];
+
+        // Export TIMESTAMP values in UTC so they are not shifted when the servers use different time zones
+        $originalTimeZone = $pdo->query('SELECT @@session.time_zone')->fetchColumn();
+        $pdo->exec("SET SESSION time_zone = '+00:00'");
+
+        // Read every table from the same point in time, even while the forum is in use
+        $pdo->exec('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+        $pdo->exec('START TRANSACTION WITH CONSISTENT SNAPSHOT');
 
         try {
             $handle = fopen($filePath, 'w');
             if (!$handle) throw new \Exception("Cannot open file for writing: " . basename($filePath));
 
-            fwrite($handle, "-- Flarum Native PHP Backup\n-- Date: " . date('Y-m-d H:i:s') . "\n\nSET FOREIGN_KEY_CHECKS=0;\nSET NAMES utf8mb4;\n\n");
+            fwrite($handle, "-- Flarum Native PHP Backup\n-- Date: " . date('Y-m-d H:i:s') . "\n\n"
+                . "SET FOREIGN_KEY_CHECKS=0;\nSET NAMES utf8mb4;\nSET TIME_ZONE='+00:00';\nSET SQL_MODE='NO_AUTO_VALUE_ON_ZERO';\n\n");
 
             $tables = $pdo->query("SHOW FULL TABLES WHERE Table_type = 'BASE TABLE'")->fetchAll(\PDO::FETCH_COLUMN);
 
@@ -627,32 +746,69 @@ class MigrationService
 
                 fwrite($handle, "DROP TABLE IF EXISTS `{$tableName}`;\n" . $createSql . ";\n\n");
 
+                // Binary values are written as hex literals so they survive any connection charset;
+                // BIT values are read as numbers because PDO returns them inconsistently
+                $binaryColumns = [];
+                $bitColumns = [];
+                $select = [];
+                foreach ($pdo->query("SHOW COLUMNS FROM `{$tableName}`")->fetchAll(\PDO::FETCH_ASSOC) as $column) {
+                    $field = str_replace('`', '``', $column['Field']);
+                    if (preg_match('/^bit/i', $column['Type'])) {
+                        $select[] = "`{$field}` + 0 AS `{$field}`";
+                        $bitColumns[$column['Field']] = true;
+                    } else {
+                        $select[] = "`{$field}`";
+                        if (preg_match('/blob|binary/i', $column['Type'])) {
+                            $binaryColumns[$column['Field']] = true;
+                        }
+                    }
+                }
+
+                $count = 0;
+
                 // Stream rows instead of loading the whole table into memory
                 $pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
                 try {
-                    $stmt = $pdo->query("SELECT * FROM `{$tableName}`");
+                    $stmt = $pdo->query("SELECT " . implode(', ', $select) . " FROM `{$tableName}`");
                     while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
-                        $columns = array_keys($row);
-                        $values = array_map(function($value) use ($pdo) {
-                            return $value === null ? 'NULL' : $pdo->quote($value);
-                        }, array_values($row));
+                        $values = [];
+                        foreach ($row as $column => $value) {
+                            if ($value === null) {
+                                $values[] = 'NULL';
+                            } elseif (isset($bitColumns[$column])) {
+                                $values[] = (string) (int) $value;
+                            } elseif (isset($binaryColumns[$column])) {
+                                $values[] = $value === '' ? "''" : '0x' . bin2hex($value);
+                            } else {
+                                $values[] = $pdo->quote($value);
+                            }
+                        }
 
-                        $sql = "INSERT INTO `{$tableName}` (`" . implode("`, `", $columns) . "`) VALUES (" . implode(", ", $values) . ");\n";
+                        $sql = "INSERT INTO `{$tableName}` (`" . implode("`, `", array_keys($row)) . "`) VALUES (" . implode(", ", $values) . ");\n";
                         fwrite($handle, $sql);
+                        $count++;
                     }
                     $stmt->closeCursor();
                 } finally {
                     $pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
                 }
                 fwrite($handle, "\n");
+
+                $rowCounts[$tableName] = $count;
+                $this->log(" -> {$tableName}: {$count} rows");
             }
 
             fwrite($handle, "SET FOREIGN_KEY_CHECKS=1;\n");
-            fclose($handle);
-            return true;
+            if (fclose($handle) === false) {
+                throw new \Exception('Failed to write the database dump. Check free disk space.');
+            }
+            return $rowCounts;
         } catch (\Throwable $e) {
             $this->log("PHP Export Error: " . $e->getMessage(), 'error');
             throw $e;
+        } finally {
+            $pdo->exec('COMMIT');
+            $pdo->exec('SET SESSION time_zone = ' . $pdo->quote($originalTimeZone));
         }
     }
 
@@ -664,11 +820,11 @@ class MigrationService
         file_put_contents($filePath, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     }
 
-    protected function createMetadata($tempDir, $includeUploads, $includeVendor)
+    protected function createMetadata($tempDir, $includeUploads, $includeVendor, array $rowCounts = [])
     {
         $metadata = [
             'app' => 'Flarum',
-            'package' => 'nauhyuh/flarum-migration-tool',
+            'package' => 't11n-dev/flarum-migration-tool',
             'date' => date('Y-m-d H:i:s'),
             'flarum_version' => \Flarum\Foundation\Application::VERSION,
             'php' => PHP_VERSION,
@@ -677,6 +833,8 @@ class MigrationService
             'url' => app('flarum.config')['url'],
             'include_uploads' => (bool) $includeUploads,
             'include_vendor' => (bool) $includeVendor,
+            'extensions_enabled' => json_decode((string) $this->db->table('settings')->where('key', 'extensions_enabled')->value('value'), true) ?: [],
+            'tables' => $rowCounts,
         ];
         file_put_contents($tempDir . '/metadata.json', json_encode($metadata, JSON_PRETTY_PRINT));
     }
@@ -688,17 +846,54 @@ class MigrationService
         chmod($tempDir . '/migrate.sh', 0755);
     }
 
+    /**
+     * Pack a directory into a ZIP, keeping empty directories. Returns the number of files added.
+     */
     protected function createZip($sourceDir, $zipPath)
     {
         $zip = new ZipArchive();
         if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) throw new \Exception("Zip failed");
-        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($sourceDir, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::LEAVES_ONLY);
-        foreach ($files as $file) {
-            if (!$file->isDir()) {
-                $zip->addFile($file->getPathname(), substr($file->getPathname(), strlen($sourceDir) + 1));
+        $items = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($sourceDir, \FilesystemIterator::SKIP_DOTS), \RecursiveIteratorIterator::SELF_FIRST);
+        $count = 0;
+        foreach ($items as $item) {
+            $name = substr($item->getPathname(), strlen($sourceDir) + 1);
+            if ($item->isDir()) {
+                $zip->addEmptyDir($name);
+            } else {
+                if (!$zip->addFile($item->getPathname(), $name)) {
+                    throw new \Exception("Could not add {$name} to the ZIP.");
+                }
+                $count++;
             }
         }
+        if (!$zip->close()) {
+            throw new \Exception('Failed to write the ZIP file. Check free disk space.');
+        }
+        return $count;
+    }
+
+    /**
+     * Check that a freshly created backup is readable and contains every file
+     */
+    protected function verifyZip($zipPath, $expectedFiles)
+    {
+        $zip = new ZipArchive();
+        if ($zip->open($zipPath, ZipArchive::CHECKCONS) !== true) {
+            throw new \Exception('Backup verification failed: the ZIP file is corrupted.');
+        }
+
+        $files = 0;
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            if (!str_ends_with($zip->getNameIndex($i), '/')) $files++;
+        }
+        $hasDump = $zip->locateName('database.sql') !== false;
         $zip->close();
+
+        if ($files !== $expectedFiles || !$hasDump) {
+            throw new \Exception("Backup verification failed: expected {$expectedFiles} files, found {$files}.");
+        }
+
+        $this->log(" -> ZIP verified ({$files} files).");
     }
 
     public function listBackups()
@@ -740,6 +935,36 @@ class MigrationService
     {
         if (!file_exists($this->logPath)) return [];
         return array_slice(file($this->logPath), -$lines);
+    }
+
+    /**
+     * Copy into a backup, following symlinks so their real content is included
+     * (a ZIP cannot hold symlinks, and absolute links would not resolve on another server).
+     */
+    protected function copyForBackup($src, $dst, array $excludePaths = [], array &$visited = [])
+    {
+        if (in_array($src, $excludePaths)) return;
+
+        $real = realpath($src);
+        if ($real === false) {
+            $this->log("Skipping broken symlink: " . substr($src, strlen(base_path()) + 1), 'warning');
+            return;
+        }
+
+        if (is_dir($real)) {
+            // Guard against symlink loops
+            if (isset($visited[$real])) return;
+            $visited[$real] = true;
+
+            @mkdir($dst, 0755, true);
+            foreach (scandir($real) as $f) {
+                if ($f === '.' || $f === '..') continue;
+                $this->copyForBackup("$src/$f", "$dst/$f", $excludePaths, $visited);
+            }
+            unset($visited[$real]);
+        } elseif (!copy($real, $dst)) {
+            throw new \Exception('Could not copy ' . substr($src, strlen(base_path()) + 1) . ' into the backup. Check permissions and free disk space.');
+        }
     }
 
     /**

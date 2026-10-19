@@ -44,25 +44,30 @@ class ImportCommand extends AbstractCommand
             // We'll use service utilities for parts of it
             
             $extractPath = storage_path('migration_temp/import_' . time());
-            mkdir($extractPath, 0755, true);
 
             $this->info('Extracting backup...');
-            $zip = new \ZipArchive();
-            if ($zip->open($backupFile) !== true) throw new \Exception('Cannot open backup file');
-            $zip->extractTo($extractPath);
-            $zip->close();
+            $metadata = $service->extractBackup($backupFile, $extractPath);
+
+            $config = app('flarum.config');
+            $dbConfig = $config['database'];
+
+            // The imported tables keep the source prefix; with a different prefix the forum would not see them
+            $currentPrefix = $dbConfig['prefix'] ?? '';
+            if (isset($metadata['db_prefix']) && $metadata['db_prefix'] !== $currentPrefix) {
+                $service->deleteDirectory($extractPath);
+                $this->error("The backup uses table prefix \"{$metadata['db_prefix']}\" but this forum uses \"{$currentPrefix}\". Use migration:migrate, which updates config.php, or change the prefix first.");
+                return 1;
+            }
 
             // Import DB using service
             $this->info('Importing database...');
-            $config = app('flarum.config');
-            $dbConfig = $config['database'];
-            
             $service->importDatabase(
                 $extractPath . '/database.sql',
                 $dbConfig['host'],
                 $dbConfig['database'],
                 $dbConfig['username'],
-                $dbConfig['password']
+                $dbConfig['password'],
+                $metadata['tables'] ?? null
             );
 
             // Copy assets (public/assets inside the backup, or storage/assets from older backups)

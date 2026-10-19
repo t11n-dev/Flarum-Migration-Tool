@@ -586,6 +586,7 @@ export default class MigrationPage extends ExtensionPage {
       .then((response) => {
         if (response.success) {
           app.alerts.show(Alert, { type: 'success' }, app.translator.trans('migration-tool.admin.migrate.success'));
+          (response.warnings || []).forEach((warning) => app.alerts.show(Alert, { type: 'warning' }, warning));
           this.switchTab('logs');
         } else {
           app.alerts.show(Alert, { type: 'error' }, response.error);
