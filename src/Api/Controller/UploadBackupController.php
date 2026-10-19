@@ -1,6 +1,6 @@
 <?php
 
-namespace Nauhyuh\MigrationTool\Api\Controller;
+namespace T11N\MigrationTool\Api\Controller;
 
 use Flarum\Http\RequestUtil;
 use Laminas\Diactoros\Response\JsonResponse;

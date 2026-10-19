@@ -1,6 +1,6 @@
 <?php
 
-namespace Nauhyuh\MigrationTool\Service;
+namespace T11N\MigrationTool\Service;
 
 use ZipArchive;
 

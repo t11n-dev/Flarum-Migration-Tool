@@ -113,4 +113,4 @@ The CLI is recommended for large forums that hit PHP time or upload size limits 
 This project is licensed under the MIT License.
 
 ---
-**Crafted with ❤️ by Nauhyuh**
+**Crafted with ❤️ by T11N**

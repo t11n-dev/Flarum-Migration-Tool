@@ -1,6 +1,6 @@
 <?php
 
-namespace Nauhyuh\MigrationTool\Console;
+namespace T11N\MigrationTool\Console;
 
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Question\ConfirmationQuestion;

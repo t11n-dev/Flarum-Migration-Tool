@@ -1,11 +1,11 @@
 <?php
 
-namespace Nauhyuh\MigrationTool\Console;
+namespace T11N\MigrationTool\Console;
 
 use Flarum\Console\AbstractCommand;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputOption;
-use Nauhyuh\MigrationTool\Service\MigrationService;
+use T11N\MigrationTool\Service\MigrationService;
 
 class ImportCommand extends AbstractCommand
 {

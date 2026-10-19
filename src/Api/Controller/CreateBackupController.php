@@ -1,6 +1,6 @@
 <?php
 
-namespace Nauhyuh\MigrationTool\Api\Controller;
+namespace T11N\MigrationTool\Api\Controller;
 
 use Flarum\Http\RequestUtil;
 use Illuminate\Support\Arr;
@@ -8,7 +8,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use Laminas\Diactoros\Response\JsonResponse;
-use Nauhyuh\MigrationTool\Service\MigrationService;
+use T11N\MigrationTool\Service\MigrationService;
 
 class CreateBackupController implements RequestHandlerInterface
 {

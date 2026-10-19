@@ -15,9 +15,9 @@
     "license": "MIT",
     "authors": [
         {
-            "name": "Nauhyuh",
+            "name": "T11N",
             "email": "nauhyuh@gmail.com",
-            "homepage": "https://github.com/nauhyuh"
+            "homepage": "https://github.com/t11n-dev"
         }
     ],
     "support": {
@@ -42,12 +42,12 @@
     },
     "autoload": {
         "psr-4": {
-            "Nauhyuh\\MigrationTool\\": "src/"
+            "T11N\\MigrationTool\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "Nauhyuh\\MigrationTool\\Tests\\": "tests/"
+            "T11N\\MigrationTool\\Tests\\": "tests/"
         }
     },
     "extra": {

@@ -1,6 +1,6 @@
 <?php
 
-namespace Nauhyuh\MigrationTool;
+namespace T11N\MigrationTool;
 
 use Flarum\Extend;
 
