@@ -135,7 +135,7 @@ npm run build
 Feel free to:
 - Open an issue for discussion
 - Ask on [Flarum Community](https://discuss.flarum.org)
-- Contact the maintainers
+- Contact the maintainers at [me@t11n.dev](mailto:me@t11n.dev)
 
 ## License
 
